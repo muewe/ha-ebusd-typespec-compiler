@@ -1,0 +1,80 @@
+#!/usr/bin/with-contenv bashio
+set -e
+
+bashio::log.info "Starting ebusd TypeSpec Compiler..."
+
+REPO_URL=$(bashio::config 'repo_url')
+BRANCH=$(bashio::config 'branch')
+OUTPUT_PATH=$(bashio::config 'output_path')
+
+bashio::log.info "Repository : ${REPO_URL}"
+bashio::log.info "Branch     : ${BRANCH}"
+bashio::log.info "Output     : ${OUTPUT_PATH}"
+
+WORK_DIR="/tmp/ebusd-typespec-src"
+LANGUAGES="de en"
+
+[ -d "${WORK_DIR}" ] && rm -rf "${WORK_DIR}"
+
+# 1. Clone repository
+bashio::log.info "Cloning repository (branch: ${BRANCH})..."
+git clone --depth=1 --branch "${BRANCH}" "${REPO_URL}" "${WORK_DIR}" \
+    || { bashio::log.fatal "Clone failed!"; /run/s6/basedir/bin/halt; exit 1; }
+
+cd "${WORK_DIR}"
+
+# 2. Install repo-specific dependencies
+#    @typespec/compiler + @ebusd/ebus-typespec are already baked into the image
+bashio::log.info "Installing repo dependencies..."
+npm install --silent --no-save \
+    || { bashio::log.fatal "npm install failed!"; /run/s6/basedir/bin/halt; exit 1; }
+
+# 3. Generate src/main.tsp from all TSP source files
+bashio::log.info "Generating src/main.tsp..."
+npm run maintsp \
+    || { bashio::log.fatal "maintsp failed!"; /run/s6/basedir/bin/halt; exit 1; }
+
+# 4. Compile all languages and export to language-specific subdirectories
+for LANG in ${LANGUAGES}; do
+    bashio::log.info "Compiling TSP (language: ${LANG})..."
+    npm run "compile-${LANG}" \
+        || { bashio::log.fatal "Compilation failed for language: ${LANG}!"; /run/s6/basedir/bin/halt; exit 1; }
+
+    # Dynamically locate the output directory produced by the compiler
+    OUT_SRC=$(find "${WORK_DIR}" -type d -name "ebus-typespec" -path "*/@ebusd/*" \
+        ! -path "*/node_modules/*" | head -1)
+
+    if [ -z "${OUT_SRC}" ] || [ ! -d "${OUT_SRC}" ]; then
+        bashio::log.fatal "Compiler output directory not found for language: ${LANG}!"
+        /run/s6/basedir/bin/halt
+        exit 1
+    fi
+
+    bashio::log.info "Compiler output found: ${OUT_SRC#${WORK_DIR}/}"
+
+    # Export to language-specific subdirectory
+    LANG_OUTPUT="${OUTPUT_PATH}/${LANG}"
+    bashio::log.info "Exporting to ${LANG_OUTPUT}..."
+    rm -rf "${LANG_OUTPUT}"
+    mkdir -p "${LANG_OUTPUT}"
+    cp -r "${OUT_SRC}/." "${LANG_OUTPUT}/" \
+        || { bashio::log.fatal "Export failed for language: ${LANG}!"; /run/s6/basedir/bin/halt; exit 1; }
+
+    COUNT=$(find "${LANG_OUTPUT}" -name "*.csv" | wc -l)
+    bashio::log.info "Language '${LANG}': ${COUNT} CSV file(s) exported."
+
+    # Remove compiler output before next language run
+    rm -rf "${WORK_DIR}/outcsv"*
+done
+
+# Cleanup
+rm -rf "${WORK_DIR}"
+
+bashio::log.info "Done! CSV files exported to:"
+for LANG in ${LANGUAGES}; do
+    COUNT=$(find "${OUTPUT_PATH}/${LANG}" -name "*.csv" | wc -l)
+    bashio::log.info "  ${OUTPUT_PATH}/${LANG}  (${COUNT} files)"
+done
+
+# Shut down the container cleanly
+/run/s6/basedir/bin/halt

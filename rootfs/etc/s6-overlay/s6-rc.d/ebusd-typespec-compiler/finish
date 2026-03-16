@@ -1,0 +1,6 @@
+#!/usr/bin/with-contenv bashio
+# Called by s6 after the oneshot completes (success or failure)
+# Shuts down the container cleanly
+
+bashio::log.info "Shutting down container..."
+/run/s6/basedir/bin/halt
