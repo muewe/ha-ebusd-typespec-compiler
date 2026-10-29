@@ -1,117 +1,149 @@
 #!/usr/bin/with-contenv bashio
 set -e
 
-bashio::log.info "Starting ebusd TypeSpec Compiler..."
-
-# --- Node.js version check ---
-# TypeSpec compilers >= 1.9 require Node.js >= 22 (fs.promises.glob).
-# Fail with a clear message instead of a cryptic "fs/promises does not
-# provide an export named 'glob'" crash during compilation.
-NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-if [ "${NODE_MAJOR}" -lt 22 ]; then
-    bashio::log.fatal "Node.js >= 22 required, but this image runs $(node --version)."
-    bashio::log.fatal "Please rebuild the add-on image (check that the base image ships Node.js >= 22)."
-    /run/s6/basedir/bin/halt
+fail() {
+    bashio::log.fatal "$*"
     exit 1
-fi
+}
+
+# Always stop instead of restarting this batch job after a failed command.
+cleanup() {
+    local status=$?
+    trap - EXIT
+    cd /
+    if [ -n "${WORK_DIR:-}" ]; then rm -rf -- "${WORK_DIR}"; fi
+    /run/s6/basedir/bin/halt || true
+    exit "${status}"
+}
+trap cleanup EXIT
+
+bashio::log.info "ebusd TypeSpec Compiler wird gestartet."
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+[ "${NODE_MAJOR}" -ge 22 ] || fail "Node.js >= 22 erforderlich. Bitte Add-on-Image neu bauen."
 
 REPO_URL=$(bashio::config 'repo_url')
 BRANCH=$(bashio::config 'branch')
 OUTPUT_PATH=$(bashio::config 'output_path')
-LANGUAGES=$(bashio::config 'languages')
-if [ -z "${LANGUAGES}" ]; then
-    LANGUAGES="de en"
-fi
+LANGUAGES=$(bashio::config 'languages' || true)
+DEPENDENCY_MODE=$(bashio::config 'dependency_mode' || true)
+ENTRYPOINT=$(bashio::config 'entrypoint' || true)
+LANGUAGES=${LANGUAGES:-de en}
+DEPENDENCY_MODE=${DEPENDENCY_MODE:-compatible}
+case "${DEPENDENCY_MODE}" in
+    compatible|repository) ;;
+    *) fail "Unbekannter dependency_mode: ${DEPENDENCY_MODE}" ;;
+esac
+for LANG_CODE in ${LANGUAGES}; do
+    case "${LANG_CODE}" in
+        de|en) ;;
+        *) fail "Nicht unterstützte Sprache: ${LANG_CODE}" ;;
+    esac
+done
 
-bashio::log.info "Repository : ${REPO_URL}"
-bashio::log.info "Branch     : ${BRANCH}"
-bashio::log.info "Languages  : ${LANGUAGES}"
-bashio::log.info "Output     : ${OUTPUT_PATH}"
+bashio::log.info "Repository: ${REPO_URL}"
+bashio::log.info "Git-Ref: ${BRANCH}; Sprachen: ${LANGUAGES}; Abhängigkeiten: ${DEPENDENCY_MODE}"
+bashio::log.info "Ausgabe: ${OUTPUT_PATH}"
+WORK_DIR=$(mktemp -d /tmp/ebusd-typespec-src.XXXXXX)
 
-WORK_DIR="/tmp/ebusd-typespec-src"
-
-[ -d "${WORK_DIR}" ] && rm -rf "${WORK_DIR}" || true
-
-# 1. Clone repository
-bashio::log.info "Cloning repository (branch: ${BRANCH})..."
-git clone --depth=1 --branch "${BRANCH}" "${REPO_URL}" "${WORK_DIR}" \
-    || { bashio::log.fatal "Clone failed!"; /run/s6/basedir/bin/halt; exit 1; }
-
+# Fetch accepts both branch names and refs/pull/<number>/{head,merge}.
+# Clone --branch does not accept GitHub's pull-request refs.
+case "${BRANCH}" in
+    pull/*) FETCH_REF="refs/${BRANCH}" ;;
+    *) FETCH_REF="${BRANCH}" ;;
+esac
+[ -n "${FETCH_REF}" ] && [[ "${FETCH_REF}" != -* ]] || fail "Ungültige Git-Ref."
+git init -q "${WORK_DIR}"
+git -C "${WORK_DIR}" remote add origin "${REPO_URL}"
+git -C "${WORK_DIR}" fetch --depth=1 origin "${FETCH_REF}" || fail "Git-Ref konnte nicht geladen werden."
+git -C "${WORK_DIR}" checkout -q --detach FETCH_HEAD
+SOURCE_SHA=$(git -C "${WORK_DIR}" rev-parse HEAD)
+bashio::log.info "Quell-Commit: ${SOURCE_SHA}"
 cd "${WORK_DIR}"
 
-# 2. Install the repository's pinned toolchain
-#    (@typespec/compiler + @ebusd/ebus-typespec come from the target
-#    repository's package.json, so the image itself stays version-agnostic)
-bashio::log.info "Installing repo dependencies..."
-if ! npm install --silent --no-save; then
-    bashio::log.fatal "npm install failed!"
-    bashio::log.warning "Hint: if the log above shows an ERESOLVE error, the target repository has outdated dependency pins (e.g. an unpinned @ebusd/ebus-typespec resolving to a newer release that requires a different @typespec/compiler). Fix the pins in the target repository."
-    /run/s6/basedir/bin/halt
-    exit 1
+if [ "${DEPENDENCY_MODE}" = compatible ]; then
+    bashio::log.info "Kompatible Toolchain innerhalb der Versionsvorgaben des Quell-Repos wird ermittelt."
+    node /opt/ebusd-typespec-compiler/resolve-toolchain.mjs "${WORK_DIR}" \
+        || fail "Keine kompatible Toolchain ermittelt. Details siehe oben."
 fi
 
-# Validate the installed dependency tree: npm install can exit
-# successfully even when the resolved tree contains peer-dependency
-# conflicts (e.g. @typespec/asset-emitter resolving to a release that
-# requires a newer @typespec/compiler than the repository pins). Such an
-# inconsistent toolchain later fails with cryptic "missing-implementation"
-# compiler errors, so fail early with the actual npm diagnosis instead.
-NPM_LS_OUTPUT="$(npm ls --all --omit=dev 2>&1)" \
-    || { bashio::log.fatal "The installed dependency tree is inconsistent!";
-         bashio::log.warning "npm reports the following problems:";
-         echo "${NPM_LS_OUTPUT}" | grep -E "missing|invalid|UNMET|error" | head -10 | while read -r line; do
-             bashio::log.warning "  ${line}"
-         done
-         bashio::log.warning "Fix the dependency pins in the target repository's package.json.";
-         /run/s6/basedir/bin/halt;
-         exit 1; }
+# A locked repository-mode run is intentionally strict for reproducing CI.
+# Do not run arbitrary npm install lifecycle scripts from a PR.
+if [ "${DEPENDENCY_MODE}" = repository ] && { [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; }; then
+    npm ci --ignore-scripts --no-audit --no-fund || fail "npm ci fehlgeschlagen."
+else
+    npm install --ignore-scripts --no-audit --no-fund || fail "npm install fehlgeschlagen."
+fi
 
-# 3. Generate src/main.tsp from all TSP source files
-bashio::log.info "Generating src/main.tsp..."
-npm run maintsp \
-    || { bashio::log.fatal "maintsp failed!"; /run/s6/basedir/bin/halt; exit 1; }
+if ! npm ls --all > "${WORK_DIR}/dependency-tree.log" 2>&1; then
+    cat "${WORK_DIR}/dependency-tree.log"
+    fail "Abhängigkeitsbaum ist inkonsistent. Details siehe oben."
+fi
+[ -f node_modules/@typespec/compiler/cmd/tsp.js ] \
+    || fail "Lokaler TypeSpec-Compiler fehlt; kein automatischer npx-Download erlaubt."
+[ -f node_modules/@ebusd/ebus-typespec/package.json ] || fail "Lokaler ebusd-Emitter fehlt."
+node -p '"Installiert: compiler " + require("./node_modules/@typespec/compiler/package.json").version + ", emitter " + require("./node_modules/@ebusd/ebus-typespec/package.json").version'
 
-# 4. Compile all languages and export to language-specific subdirectories
+if [ -n "${ENTRYPOINT}" ]; then
+    # Do not allow selecting a file outside the checked-out repository.
+    ENTRYPOINT=$(node -e '
+      const fs = require("node:fs"), path = require("node:path");
+      const base = fs.realpathSync(process.argv[1]);
+      const file = fs.realpathSync(path.resolve(base, process.argv[2]));
+      if (!file.startsWith(base + path.sep) || !file.endsWith(".tsp") || !fs.statSync(file).isFile()) process.exit(1);
+      console.log(file);
+    ' "${WORK_DIR}" "${ENTRYPOINT}") || fail "Einstiegspunkt muss eine vorhandene .tsp-Datei innerhalb des Repos sein."
+    bashio::log.info "Gezielter Test: ${ENTRYPOINT#${WORK_DIR}/} (kein vollständiger Repository-Build)"
+else
+    npm run maintsp || fail "Erzeugen von src/main.tsp fehlgeschlagen."
+fi
+mkdir "${WORK_DIR}/export-stage"
 for LANG_CODE in ${LANGUAGES}; do
-    bashio::log.info "Compiling TSP (language: ${LANG_CODE})..."
-    npm run "compile-${LANG_CODE}" \
-        || { bashio::log.fatal "Compilation failed for language: ${LANG_CODE}!"; /run/s6/basedir/bin/halt; exit 1; }
-
-    # Dynamically locate the output directory produced by the compiler
-    OUT_SRC=$(find "${WORK_DIR}" -type d -name "ebus-typespec" -path "*/@ebusd/*" \
-        ! -path "*/node_modules/*" | head -1)
-
-    if [ -z "${OUT_SRC}" ] || [ ! -d "${OUT_SRC}" ]; then
-        bashio::log.fatal "Compiler output directory not found for language: ${LANG_CODE}!"
-        /run/s6/basedir/bin/halt
-        exit 1
+    # Discard generated output from the source checkout or the previous language.
+    rm -rf -- "${WORK_DIR}/outcsv"*
+    bashio::log.info "Kompilierung: ${LANG_CODE}"
+    if [ -n "${ENTRYPOINT}" ]; then
+        COMPILE_ARGS=(compile --emit @ebusd/ebus-typespec "${ENTRYPOINT}" --output-dir outcsv)
+        if [ "${LANG_CODE}" = de ]; then
+            [ -f src/de.yaml ] || fail "Übersetzungsdatei src/de.yaml fehlt."
+            COMPILE_ARGS+=(--option @ebusd/ebus-typespec.translations=src/de.yaml)
+        fi
+        node node_modules/@typespec/compiler/cmd/tsp.js "${COMPILE_ARGS[@]}" \
+            || fail "Gezielte TypeSpec-Kompilierung fehlgeschlagen; bestehende Exporte bleiben unverändert."
+    else
+        npm run "compile-${LANG_CODE}" \
+            || fail "TypeSpec-Kompilierung für ${LANG_CODE} fehlgeschlagen. Quellfehler werden nicht ignoriert; bestehende Exporte bleiben unverändert."
     fi
-
-    bashio::log.info "Compiler output found: ${OUT_SRC#${WORK_DIR}/}"
-
-    # Export to language-specific subdirectory
-    LANG_OUTPUT="${OUTPUT_PATH}/${LANG_CODE}"
-    bashio::log.info "Exporting to ${LANG_OUTPUT}..."
-    rm -rf "${LANG_OUTPUT}"
-    mkdir -p "${LANG_OUTPUT}"
-    cp -r "${OUT_SRC}/." "${LANG_OUTPUT}/" \
-        || { bashio::log.fatal "Export failed for language: ${LANG_CODE}!"; /run/s6/basedir/bin/halt; exit 1; }
-
-    COUNT=$(find "${LANG_OUTPUT}" -name "*.csv" | wc -l)
-    bashio::log.info "Language '${LANG_CODE}': ${COUNT} CSV file(s) exported."
-
-    # Remove compiler output before next language run
-    rm -rf "${WORK_DIR}/outcsv"*
+    mapfile -t OUTPUT_DIRS < <(find "${WORK_DIR}" -type d -name ebus-typespec \
+        -path '*/@ebusd/*' ! -path '*/node_modules/*')
+    [ "${#OUTPUT_DIRS[@]}" -eq 1 ] \
+        || fail "Erwartet wurde genau ein Compiler-Ausgabeverzeichnis, gefunden: ${#OUTPUT_DIRS[@]}"
+    OUT_SRC=${OUTPUT_DIRS[0]}
+    COUNT=$(find "${OUT_SRC}" -type f -name '*.csv' | wc -l)
+    [ "${COUNT}" -gt 0 ] || fail "Keine CSV-Dateien für ${LANG_CODE} erzeugt."
+    mkdir "${WORK_DIR}/export-stage/${LANG_CODE}"
+    cp -r "${OUT_SRC}/." "${WORK_DIR}/export-stage/${LANG_CODE}/"
+    # Keep a reproducibility record alongside each language's output.
+    printf 'repository=%s\nref=%s\ncommit=%s\ndependency_mode=%s\nentrypoint=%s\n' \
+        "${REPO_URL}" "${BRANCH}" "${SOURCE_SHA}" "${DEPENDENCY_MODE}" "${ENTRYPOINT#${WORK_DIR}/}" \
+        > "${WORK_DIR}/export-stage/${LANG_CODE}/.addon-build-info"
+    node -p 'JSON.stringify({compiler: require("./node_modules/@typespec/compiler/package.json").version, emitter: require("./node_modules/@ebusd/ebus-typespec/package.json").version})' \
+        >> "${WORK_DIR}/export-stage/${LANG_CODE}/.addon-build-info"
+    bashio::log.info "${LANG_CODE}: ${COUNT} CSV-Dateien bereitgestellt."
 done
 
-# Cleanup
-rm -rf "${WORK_DIR}"
-
-bashio::log.info "Done! CSV files exported to:"
+# Publish only after every requested language has compiled successfully.
+mkdir -p "${OUTPUT_PATH}"
 for LANG_CODE in ${LANGUAGES}; do
-    COUNT=$(find "${OUTPUT_PATH}/${LANG_CODE}" -name "*.csv" | wc -l)
-    bashio::log.info "  ${OUTPUT_PATH}/${LANG_CODE}  (${COUNT} files)"
+    TARGET="${OUTPUT_PATH}/${LANG_CODE}"
+    STAGE=$(mktemp -d "${OUTPUT_PATH}/.${LANG_CODE}.XXXXXX")
+    cp -r "${WORK_DIR}/export-stage/${LANG_CODE}/." "${STAGE}/"
+    if [ -e "${TARGET}" ]; then
+        mv -- "${TARGET}" "${STAGE}.previous"
+    fi
+    if ! mv -- "${STAGE}" "${TARGET}"; then
+        if [ -e "${STAGE}.previous" ]; then mv -- "${STAGE}.previous" "${TARGET}"; fi
+        fail "Export nach ${TARGET} fehlgeschlagen."
+    fi
+    rm -rf -- "${STAGE}.previous"
 done
-
-# Shut down the container cleanly
-/run/s6/basedir/bin/halt
+bashio::log.info "Fertig. CSV-Dateien für Commit ${SOURCE_SHA} unter ${OUTPUT_PATH} exportiert."

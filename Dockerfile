@@ -14,4 +14,5 @@ RUN apk add --no-cache \
 RUN node -e "if (parseInt(process.versions.node) < 22) { console.error('Node.js >= 22 required, got ' + process.version); process.exit(1); }"
 
 COPY rootfs /
+RUN npm ci --prefix /opt/ebusd-typespec-compiler --omit=dev --ignore-scripts --no-audit --no-fund
 RUN chmod a+x /etc/s6-overlay/s6-rc.d/ebusd-typespec-compiler/run

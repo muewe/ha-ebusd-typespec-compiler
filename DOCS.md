@@ -1,97 +1,124 @@
 # ebusd TypeSpec Compiler
 
-This add-on clones a GitHub repository containing ebusd configuration files in
-TypeSpec (`.tsp`) format, compiles them for **all supported languages** using the
-official [@ebusd/ebus-typespec](https://github.com/john30/ebus-typespec) emitter,
-and exports the generated CSV files into language-specific subdirectories.
+Dieses Add-on testet TypeSpec-Konfigurationen aus Git-Repositories und exportiert
+erfolgreich kompilierte CSV-Dateien für ebusd. Forks, normale Branches und GitHub-
+Pull-Request-Refs können ausgewählt werden; ein Wechsel auf einen bestimmten
+Fork ist nicht erforderlich.
 
-## How it works
+## Konfiguration
 
-1. The configured Git repository is cloned into a temporary directory (`--depth=1` for efficiency)
-2. Repo-specific npm dependencies are installed (`npm install`)
-3. `src/main.tsp` is generated from all `.tsp` source files (`npm run maintsp`)
-4. The TypeSpec compiler runs for **each language** (`compile-de`, `compile-en`)
-5. Each language output is exported to its own subdirectory (`output_path/de/`, `output_path/en/`)
-6. The add-on shuts down the container cleanly after completion
+| Option | Standard | Bedeutung |
+|--------|----------|-----------|
+| `repo_url` | `https://github.com/john30/ebusd-configuration` | Repository mit den zu prüfenden Quellen |
+| `branch` | `master` | Branch, Tag, erreichbare Commit-ID oder Git-Ref |
+| `dependency_mode` | `compatible` | Passende Toolchain innerhalb der Repository-Versionsvorgaben auswählen; `repository` übernimmt Manifest und Lockfile unverändert |
+| `entrypoint` | `""` | Leer: vollständiger Build über die Repository-Skripte. Sonst relativer Pfad zu einer einzelnen `.tsp`-Einstiegsdatei |
+| `languages` | `[de, en]` | Zu kompilierende Sprachen |
+| `output_path` | `/config/ebusd-configuration` | Basisverzeichnis für die Unterordner `de` und `en` |
 
-> `@typespec/compiler` and `@ebusd/ebus-typespec` are installed from the target
-> repository's own `package.json` pins at runtime, so the add-on image itself
-> stays version-agnostic and always uses the toolchain the repository was
-> written for.
->
-> **Node.js >= 22 is required** by current TypeSpec compilers. The image build
-> fails early if the base image ships an older Node.js, and the run script
-> verifies the version with a clear error message.
+`output_path` muss in einem eingebundenen Verzeichnis liegen, beispielsweise
+unter `/config` oder `/share`. Das Add-on startet nicht automatisch beim
+Home-Assistant-Start und beendet sich nach seinem Durchlauf.
 
-## Output structure
-
-```
-output_path/
-├── de/       ← German CSV files  (use with: --configpath /your/path/de)
-└── en/       ← English CSV files (use with: --configpath /your/path/en)
-```
-
-## Configuration
-
-| Option        | Type   | Default                                          | Description                                                              |
-|---------------|--------|--------------------------------------------------|--------------------------------------------------------------------------|
-| `repo_url`    | string | `https://github.com/john30/ebusd-configuration` | URL of the Git repository containing the TSP configuration files         |
-| `branch`      | string | `master`                                         | Git branch to clone (e.g. `master`, `dev`, a feature branch)            |
-| `languages`   | list   | `de`, `en`                                       | Languages to compile — one `compile-<lang>` npm script is run per entry |
-| `output_path` | string | `/config/ebusd-configuration`                    | Base path — language subdirectories are created automatically            |
-
-## Example configuration
+### Einen Pull Request bei john30 prüfen
 
 ```yaml
-repo_url: "https://github.com/john30/ebusd-configuration"
-branch: "master"
+repo_url: https://github.com/john30/ebusd-configuration
+branch: pull/123/head
+dependency_mode: compatible
 languages:
-  - de
   - en
-output_path: "/config/ebusd-configuration"
+output_path: /share/ebusd/pr-test
 ```
 
-## Pointing ebusd to the output
+`123` ist ein Platzhalter für die PR-Nummer. `pull/123/head` lädt den
+Quell-Commit des Pull Requests direkt aus dem Ziel-Repository, auch wenn der
+PR aus einem Fork stammt; alternativ ist `refs/pull/123/head` möglich.
+Das GitHub-Format dieser Refs ist in der
+[GitHub-Dokumentation](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/checking-out-pull-requests-locally)
+beschrieben.
 
-Use the language subdirectory as your ebusd `--configpath`:
+`pull/123/merge` prüft stattdessen GitHubs Test-Merge mit dem Zielbranch.
+Diese Ref ist nicht immer verfügbar, etwa bei Merge-Konflikten. Für einen
+normalen Fork werden dessen `repo_url` und Branch-Name eingetragen.
 
+## Abhängigkeiten und reproduzierbare Prüfungen
+
+- **`compatible`:** Ermittelt veröffentlichte Compiler-, ebusd-Emitter- und
+  Asset-Emitter-Versionen über npm. Ausgewählt wird die neueste kompatible
+  Kombination innerhalb der im Quell-Repository deklarierten Compiler- und
+  Emitter-Bereiche und passend zur vorhandenen Node-Version. Die entsprechenden
+  Pins und Overrides werden ausschließlich im temporären Checkout gesetzt.
+  Dessen Lockfiles werden für diese Auflösung entfernt, die `.tsp`-Dateien und
+  npm-Skripte bleiben unverändert.
+- **`repository`:** Verändert keine Abhängigkeitsvorgaben. Mit vorhandenem
+  `package-lock.json` oder `npm-shrinkwrap.json` wird `npm ci` ausgeführt,
+  andernfalls `npm install`. Dieser Modus eignet sich für die exakte Prüfung
+  des Repository-Manifests; vorhandene Peer-Konflikte führen zum Fehler.
+
+Der Unterschied ist absichtlich sichtbar: Ein erfolgreicher `compatible`-
+Durchlauf bestätigt die Quellen mit der protokollierten Toolchain, nicht die
+Fehlerfreiheit des unveränderten Abhängigkeitsmanifests oder des CI-Builds.
+Eine mit `repository` gefundene Abhängigkeitsstörung ist weiterhin ein
+berichtenswerter Befund zum Pull Request.
+
+Es werden keine Versionsgrenzen ungefragt erweitert und keine echten
+TypeSpec-Diagnosen ignoriert. Wenn ein PR unvereinbare exakte Pins enthält oder
+sein TypeSpec-Code fehlerhaft ist, schlägt die Prüfung weiterhin fehl.
+Git-/Datei-Abhängigkeiten statt npm-Semver-Bereichen sind im Kompatibilitätsmodus
+nicht unterstützt; dafür steht `repository` bereit.
+
+Im Log stehen Repository, gewählte Ref, exakter Quell-Commit und Toolchain.
+Jeder Sprachordner enthält zusätzlich `.addon-build-info` mit Commit und
+Compiler-/Emitter-Versionen. Der Build-Helper benötigt Node.js ab Version 22.
+
+## Ablauf und Export
+
+Das Repository muss `maintsp` und je gewünschter Sprache `compile-de` oder
+`compile-en` in `package.json` definieren und die lokale TypeSpec-/ebusd-
+Toolchain deklarieren. Installations-Lifecycle-Skripte werden deaktiviert,
+die expliziten `maintsp`-/`compile-*`-Skripte jedoch ausgeführt.
+
+Alle ausgewählten Sprachen werden zunächst temporär kompiliert. Erst wenn sie
+alle erfolgreich sind und CSV-Dateien erzeugt haben, werden die Sprachordner
+unter `output_path` ersetzt. Ein Compilerfehler lässt vorherige Exporte
+unverändert; unvollständige CSVs aus einem fehlgeschlagenen Compile gelten nicht
+als Erfolg.
+
+Für produktives ebusd beispielsweise `--configpath /config/ebusd-configuration/en`
+verwenden. Zum Prüfen von PRs besser einen eigenen Test-Ausgabepfad wählen.
+
+### Einzelne Konfiguration statt Gesamtrepository testen
+
+Bei `entrypoint: src/vaillant/08.hmu.tsp` wird diese Datei samt ihren Imports
+direkt mit dem lokalen ebusd-Emitter kompiliert. `maintsp` und die `compile-*`-
+Skripte werden dafür nicht aufgerufen; Deutsch verwendet `src/de.yaml`.
+So können PR-Änderungen gezielt geprüft werden, auch wenn andere, nicht
+importierte Konfigurationen im Gesamtrepository fehlerhaft sind.
+
+Dieser gezielte Test ist kein erfolgreicher Gesamtrepository-Build. Das Log
+und `.addon-build-info` halten den gewählten Einstiegspunkt ausdrücklich fest.
+Leer lassen, um weiterhin das gesamte Repository zu prüfen.
+
+## Sicherheit und Grenzen
+
+PRs und Forks können beliebige npm-Skripte enthalten. Nur vertrauenswürdige
+Quellen ausführen: Das Add-on hat Schreibzugriff auf `/config` und `/share`;
+es ist keine Sandbox für fremden Code. Insbesondere dürfen unkontrollierte
+PRs nicht allein wegen des deaktivierten Installations-Hooks als sicher gelten.
+
+Ein echter Home-Assistant-Container-Build prüft zusätzlich APK-Pakete,
+Bashio und s6-Integration. Die automatisierten Tests im Repository prüfen
+Toolchain-Auswahl und Runner-Verhalten, ersetzen aber diese Integration nicht.
+
+## Entwicklung und Tests
+
+```sh
+npm ci --prefix rootfs/opt/ebusd-typespec-compiler
+npm test --prefix rootfs/opt/ebusd-typespec-compiler
+bash tests/runner.test.sh
 ```
---configpath /config/ebusd-configuration/de
-```
 
-## Usage
-
-1. Install the add-on from your local add-on store
-2. Configure the options above
-3. Start the add-on — it will compile all languages and shut down automatically
-4. Check the add-on log to see how many CSV files were exported per language
-5. To re-run, simply start the add-on again
-
-## Notes
-
-- `boot: manual` is set — the add-on will **never start automatically** on HA boot
-- The `output_path` must be inside `/config` as only that directory is mapped
-- Any fork of `john30/ebusd-configuration` that provides `maintsp`, `compile-de`
-  and `compile-en` scripts in its `package.json` is compatible
-
-## Requirements
-
-The cloned repository must provide the following npm scripts in its `package.json`:
-
-| Script       | Purpose                                     |
-|--------------|---------------------------------------------|
-| `maintsp`    | Generates `src/main.tsp` from all TSP files |
-| `compile-de` | Compiles `main.tsp` to CSV (German)         |
-| `compile-en` | Compiles `main.tsp` to CSV (English)        |
-
-This matches the structure of [john30/ebusd-configuration](https://github.com/john30/ebusd-configuration) and compatible forks.
-
-## Troubleshooting
-
-| Symptom | Cause / Fix |
-|---------|-------------|
-| `npm install` fails with `ERESOLVE` | The target repository has outdated dependency pins (e.g. an unpinned `@ebusd/ebus-typespec` resolving to a newer release that requires a different `@typespec/compiler`). Fix the pins in the target repository's `package.json`. |
-| Compilation fails with `duplicate-id` errors | The target repository's TSP sources are broken upstream (e.g. duplicate message names in the same file). This is a configuration repo issue, not an add-on issue — fix the `.tsp` sources or use a working branch. |
-| `fs/promises does not provide an export named 'glob'` | The image runs Node.js < 22, but the repository's `@typespec/compiler` needs >= 22. Rebuild the add-on image from a current base image (the build now fails early with a clear message instead). |
-| `missing-implementation` compiler errors / "dependency tree is inconsistent" | `npm install` can exit successfully even when the resolved tree contains peer-dependency conflicts (e.g. `@typespec/asset-emitter` resolving to a release that needs a newer `@typespec/compiler` than the repository pins). The run script validates the tree after install and aborts with the actual npm diagnosis — fix the pins in the target repository. |
-| Container exits immediately, no CSV output | Check the add-on log — the run script logs the exact failing step before shutting down. |
+`tests/live-runner.sh <repo_url> <ref> <sprachen> [entrypoint]` führt die echte
+Fetch-/Installations-/Compile-/Export-Pipeline ohne Home Assistant aus.
+Nur das Herunterfahren und Bashio-Konfigurationsaufrufe werden ersetzt.
