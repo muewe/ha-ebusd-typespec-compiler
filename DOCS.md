@@ -14,8 +14,14 @@ and exports the generated CSV files into language-specific subdirectories.
 5. Each language output is exported to its own subdirectory (`output_path/de/`, `output_path/en/`)
 6. The add-on shuts down the container cleanly after completion
 
-> `@typespec/compiler` and `@ebusd/ebus-typespec` are baked into the image at
-> build time, so no heavy downloads occur at runtime.
+> `@typespec/compiler` and `@ebusd/ebus-typespec` are installed from the target
+> repository's own `package.json` pins at runtime, so the add-on image itself
+> stays version-agnostic and always uses the toolchain the repository was
+> written for.
+>
+> **Node.js >= 22 is required** by current TypeSpec compilers. The image build
+> fails early if the base image ships an older Node.js, and the run script
+> verifies the version with a clear error message.
 
 ## Output structure
 
@@ -31,6 +37,7 @@ output_path/
 |---------------|--------|--------------------------------------------------|--------------------------------------------------------------------------|
 | `repo_url`    | string | `https://github.com/john30/ebusd-configuration` | URL of the Git repository containing the TSP configuration files         |
 | `branch`      | string | `master`                                         | Git branch to clone (e.g. `master`, `dev`, a feature branch)            |
+| `languages`   | list   | `de`, `en`                                       | Languages to compile — one `compile-<lang>` npm script is run per entry |
 | `output_path` | string | `/config/ebusd-configuration`                    | Base path — language subdirectories are created automatically            |
 
 ## Example configuration
@@ -38,6 +45,9 @@ output_path/
 ```yaml
 repo_url: "https://github.com/john30/ebusd-configuration"
 branch: "master"
+languages:
+  - de
+  - en
 output_path: "/config/ebusd-configuration"
 ```
 
@@ -75,3 +85,13 @@ The cloned repository must provide the following npm scripts in its `package.jso
 | `compile-en` | Compiles `main.tsp` to CSV (English)        |
 
 This matches the structure of [john30/ebusd-configuration](https://github.com/john30/ebusd-configuration) and compatible forks.
+
+## Troubleshooting
+
+| Symptom | Cause / Fix |
+|---------|-------------|
+| `npm install` fails with `ERESOLVE` | The target repository has outdated dependency pins (e.g. an unpinned `@ebusd/ebus-typespec` resolving to a newer release that requires a different `@typespec/compiler`). Fix the pins in the target repository's `package.json`. |
+| Compilation fails with `duplicate-id` errors | The target repository's TSP sources are broken upstream (e.g. duplicate message names in the same file). This is a configuration repo issue, not an add-on issue — fix the `.tsp` sources or use a working branch. |
+| `fs/promises does not provide an export named 'glob'` | The image runs Node.js < 22, but the repository's `@typespec/compiler` needs >= 22. Rebuild the add-on image from a current base image (the build now fails early with a clear message instead). |
+| `missing-implementation` compiler errors / "dependency tree is inconsistent" | `npm install` can exit successfully even when the resolved tree contains peer-dependency conflicts (e.g. `@typespec/asset-emitter` resolving to a release that needs a newer `@typespec/compiler` than the repository pins). The run script validates the tree after install and aborts with the actual npm diagnosis — fix the pins in the target repository. |
+| Container exits immediately, no CSV output | Check the add-on log — the run script logs the exact failing step before shutting down. |
