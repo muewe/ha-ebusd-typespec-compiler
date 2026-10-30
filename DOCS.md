@@ -12,6 +12,7 @@ Fork ist nicht erforderlich.
 | `repo_url` | `https://github.com/john30/ebusd-configuration` | Repository mit den zu prüfenden Quellen |
 | `branch` | `master` | Branch, Tag, erreichbare Commit-ID oder Git-Ref |
 | `dependency_mode` | `compatible` | Passende Toolchain innerhalb der Repository-Versionsvorgaben auswählen; `repository` übernimmt Manifest und Lockfile unverändert |
+| `ignore_compile_errors` | `false` | Bei `true` trotz fehlgeschlagenem Compile bereits erzeugte CSVs exportieren; Warnungen und Fehlerstatus bleiben sichtbar |
 | `entrypoint` | `""` | Leer: vollständiger Build über die Repository-Skripte. Sonst relativer Pfad zu einer einzelnen `.tsp`-Einstiegsdatei |
 | `languages` | `[de, en]` | Zu kompilierende Sprachen |
 | `output_path` | `/config/ebusd-configuration` | Basisverzeichnis für die Unterordner `de` und `en` |
@@ -62,9 +63,11 @@ Fehlerfreiheit des unveränderten Abhängigkeitsmanifests oder des CI-Builds.
 Eine mit `repository` gefundene Abhängigkeitsstörung ist weiterhin ein
 berichtenswerter Befund zum Pull Request.
 
-Es werden keine Versionsgrenzen ungefragt erweitert und keine echten
-TypeSpec-Diagnosen ignoriert. Wenn ein PR unvereinbare exakte Pins enthält oder
-sein TypeSpec-Code fehlerhaft ist, schlägt die Prüfung weiterhin fehl.
+Es werden keine Versionsgrenzen ungefragt erweitert. Wenn ein PR unvereinbare
+exakte Pins enthält, schlägt die Prüfung weiterhin fehl. Fehlerhafter TypeSpec-
+Code führt standardmäßig ebenfalls zum Abbruch; ab Version 1.6.0 kann für den
+Export vorhandener CSVs ausdrücklich `ignore_compile_errors: true` gesetzt
+werden. Dieser Export ist kein erfolgreicher Compile-Test.
 Git-/Datei-Abhängigkeiten statt npm-Semver-Bereichen sind im Kompatibilitätsmodus
 nicht unterstützt; dafür steht `repository` bereit.
 
@@ -79,14 +82,47 @@ Das Repository muss `maintsp` und je gewünschter Sprache `compile-de` oder
 Toolchain deklarieren. Installations-Lifecycle-Skripte werden deaktiviert,
 die expliziten `maintsp`-/`compile-*`-Skripte jedoch ausgeführt.
 
-Alle ausgewählten Sprachen werden zunächst temporär kompiliert. Erst wenn sie
-alle erfolgreich sind und CSV-Dateien erzeugt haben, werden die Sprachordner
-unter `output_path` ersetzt. Ein Compilerfehler lässt vorherige Exporte
-unverändert; unvollständige CSVs aus einem fehlgeschlagenen Compile gelten nicht
-als Erfolg.
+Alle ausgewählten Sprachen werden zunächst temporär kompiliert. Standardmäßig
+werden die Sprachordner unter `output_path` erst ersetzt, wenn alle Sprachen
+erfolgreich sind und CSV-Dateien erzeugt haben. Ein Compilerfehler lässt
+vorherige Exporte unverändert. Mit `ignore_compile_errors: true` genügt pro
+Sprache eine vorhandene, nicht leere CSV-Ausgabe, auch bei Compiler-Exitcode
+ungleich null. Der Inhalt der CSVs wird dabei nicht als fehlerfrei validiert.
 
 Für produktives ebusd beispielsweise `--configpath /config/ebusd-configuration/en`
 verwenden. Zum Prüfen von PRs besser einen eigenen Test-Ausgabepfad wählen.
+
+### CSVs trotz Compilerfehlern exportieren
+
+```yaml
+repo_url: https://github.com/john30/ebusd-configuration
+branch: master
+dependency_mode: compatible
+ignore_compile_errors: true
+entrypoint: ""
+languages:
+  - en
+output_path: /share/ebusd/ebusd-configuration
+```
+
+Diese Option ist beispielsweise für einen Durchlauf mit `ebus/duplicate-id`-
+Diagnosen gedacht, bei dem der Emitter dennoch CSVs schreibt. Sie repariert
+weder doppelte IDs noch andere TypeSpec-Fehler und entfernt keine betroffenen
+Definitionen aus den Dateien. Die CSVs können unvollständig oder für ebusd
+mehrdeutig/ungültig sein. Vor produktiver Nutzung prüfen.
+
+Die Diagnosen bleiben im Log sichtbar. Pro Sprache enthält `.addon-build-info`
+zusätzlich `ignore_compile_errors`, `compile_exit_code` und
+`compile_errors_ignored`. Bei übernommenen Compilerfehlern endet das Add-on
+nach dem Export regulär mit Exitcode 0, aber mit einer ausdrücklichen Warnung,
+dass dies kein erfolgreicher Compile-Test ist.
+
+Die Option übergeht ausschließlich einen Fehlerstatus des Compile-Kommandos,
+nicht Fehler beim Git-Checkout, der Toolchain-Auflösung, Installation oder
+Erzeugung von `src/main.tsp`. Fehlende, leere oder mehrdeutige Ausgabeverzeichnisse
+führen weiterhin zum Abbruch. Fehlt für eine angeforderte Sprache die
+CSV-Ausgabe, werden auch die bereits vorbereiteten anderen Sprachen nicht
+exportiert; bestehende Exporte bleiben unverändert.
 
 ### Einzelne Konfiguration statt Gesamtrepository testen
 

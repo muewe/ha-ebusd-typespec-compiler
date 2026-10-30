@@ -1,6 +1,6 @@
 name: "ebusd TypeSpec Compiler"
 description: "Home Assistant addon to clone an ebusd-configuration repository (TypeSpec), compiles it for all languages and exports the generated CSV files to a configurable path."
-version: "1.5.0"
+version: "1.6.0"
 slug: "ebusd_typespec_compiler"
 init: false
 boot: manual
@@ -16,6 +16,7 @@ options:
   repo_url: "https://github.com/john30/ebusd-configuration"
   branch: "master"
   dependency_mode: compatible
+  ignore_compile_errors: false
   entrypoint: ""
   languages:
     - de
@@ -25,6 +26,7 @@ schema:
   repo_url: str
   branch: str
   dependency_mode: list(compatible|repository)
+  ignore_compile_errors: bool?
   entrypoint: str?
   languages:
     - list(de|en)

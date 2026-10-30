@@ -8,6 +8,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 export TEST_REPO=${1:?Repository required} TEST_REF=${2:-master}
 export TEST_LANGUAGES=${3:-en} TEST_ENTRYPOINT=${4:-}
 export TEST_MODE=${TEST_MODE:-compatible}
+export TEST_IGNORE_COMPILE_ERRORS=${TEST_IGNORE_COMPILE_ERRORS:-false}
 export TEST_OUTPUT=${TEST_OUTPUT:-$(mktemp -d /tmp/ebusd-live-output.XXXXXX)}
 RUN_FILE=$(mktemp)
 trap 'rm -f "$RUN_FILE"' EXIT
@@ -22,10 +23,12 @@ bashio::config() {
         languages) printf '%s' "$TEST_LANGUAGES" ;;
         dependency_mode) printf '%s' "$TEST_MODE" ;;
         entrypoint) printf '%s' "$TEST_ENTRYPOINT" ;;
+        ignore_compile_errors) printf '%s' "$TEST_IGNORE_COMPILE_ERRORS" ;;
     esac
 }
 bashio::log.info() { printf '[INFO] %s\n' "$*"; }
 bashio::log.fatal() { printf '[FATAL] %s\n' "$*"; }
-export -f bashio::config bashio::log.info bashio::log.fatal
+bashio::log.warning() { printf '[WARNING] %s\n' "$*"; }
+export -f bashio::config bashio::log.info bashio::log.fatal bashio::log.warning
 printf 'Export directory: %s\n' "$TEST_OUTPUT"
 bash "$RUN_FILE"

@@ -27,8 +27,15 @@ OUTPUT_PATH=$(bashio::config 'output_path')
 LANGUAGES=$(bashio::config 'languages' || true)
 DEPENDENCY_MODE=$(bashio::config 'dependency_mode' || true)
 ENTRYPOINT=$(bashio::config 'entrypoint' || true)
+IGNORE_COMPILE_ERRORS=$(bashio::config 'ignore_compile_errors' || true)
 LANGUAGES=${LANGUAGES:-de en}
 DEPENDENCY_MODE=${DEPENDENCY_MODE:-compatible}
+IGNORE_COMPILE_ERRORS=${IGNORE_COMPILE_ERRORS:-false}
+case "${IGNORE_COMPILE_ERRORS}" in
+    true|false) ;;
+    *) fail "ignore_compile_errors muss true oder false sein." ;;
+esac
+ANY_COMPILE_ERRORS=false
 case "${DEPENDENCY_MODE}" in
     compatible|repository) ;;
     *) fail "Unbekannter dependency_mode: ${DEPENDENCY_MODE}" ;;
@@ -43,6 +50,9 @@ done
 bashio::log.info "Repository: ${REPO_URL}"
 bashio::log.info "Git-Ref: ${BRANCH}; Sprachen: ${LANGUAGES}; Abhängigkeiten: ${DEPENDENCY_MODE}"
 bashio::log.info "Ausgabe: ${OUTPUT_PATH}"
+if [ "${IGNORE_COMPILE_ERRORS}" = true ]; then
+    bashio::log.warning "ignore_compile_errors ist aktiv: Trotz Compilerfehlern erzeugte CSVs dürfen exportiert werden. Sie können unvollständig sein oder ungültige/mehrdeutige Definitionen enthalten."
+fi
 WORK_DIR=$(mktemp -d /tmp/ebusd-typespec-src.XXXXXX)
 
 # Fetch accepts both branch names and refs/pull/<number>/{head,merge}.
@@ -101,6 +111,8 @@ for LANG_CODE in ${LANGUAGES}; do
     # Discard generated output from the source checkout or the previous language.
     rm -rf -- "${WORK_DIR}/outcsv"*
     bashio::log.info "Kompilierung: ${LANG_CODE}"
+    COMPILE_EXIT=0
+    COMPILE_ERRORS_IGNORED=false
     if [ -n "${ENTRYPOINT}" ]; then
         COMPILE_ARGS=(compile --emit @ebusd/ebus-typespec "${ENTRYPOINT}" --output-dir outcsv)
         if [ "${LANG_CODE}" = de ]; then
@@ -108,10 +120,18 @@ for LANG_CODE in ${LANGUAGES}; do
             COMPILE_ARGS+=(--option @ebusd/ebus-typespec.translations=src/de.yaml)
         fi
         node node_modules/@typespec/compiler/cmd/tsp.js "${COMPILE_ARGS[@]}" \
-            || fail "Gezielte TypeSpec-Kompilierung fehlgeschlagen; bestehende Exporte bleiben unverändert."
+            || COMPILE_EXIT=$?
     else
         npm run "compile-${LANG_CODE}" \
-            || fail "TypeSpec-Kompilierung für ${LANG_CODE} fehlgeschlagen. Quellfehler werden nicht ignoriert; bestehende Exporte bleiben unverändert."
+            || COMPILE_EXIT=$?
+    fi
+    if [ "${COMPILE_EXIT}" -ne 0 ]; then
+        if [ "${IGNORE_COMPILE_ERRORS}" != true ]; then
+            fail "TypeSpec-Kompilierung für ${LANG_CODE} fehlgeschlagen (Exitcode ${COMPILE_EXIT}). Quellfehler werden nicht ignoriert; bestehende Exporte bleiben unverändert."
+        fi
+        COMPILE_ERRORS_IGNORED=true
+        ANY_COMPILE_ERRORS=true
+        bashio::log.warning "Kompilierung für ${LANG_CODE} mit Exitcode ${COMPILE_EXIT} fehlgeschlagen. Wegen ignore_compile_errors=true werden ausschließlich bereits erzeugte CSVs exportiert, sofern vorhanden. Die Fehler sind NICHT behoben."
     fi
     mapfile -t OUTPUT_DIRS < <(find "${WORK_DIR}" -type d -name ebus-typespec \
         -path '*/@ebusd/*' ! -path '*/node_modules/*')
@@ -126,12 +146,16 @@ for LANG_CODE in ${LANGUAGES}; do
     printf 'repository=%s\nref=%s\ncommit=%s\ndependency_mode=%s\nentrypoint=%s\n' \
         "${REPO_URL}" "${BRANCH}" "${SOURCE_SHA}" "${DEPENDENCY_MODE}" "${ENTRYPOINT#${WORK_DIR}/}" \
         > "${WORK_DIR}/export-stage/${LANG_CODE}/.addon-build-info"
+    printf 'ignore_compile_errors=%s\ncompile_exit_code=%s\ncompile_errors_ignored=%s\n' \
+        "${IGNORE_COMPILE_ERRORS}" "${COMPILE_EXIT}" "${COMPILE_ERRORS_IGNORED}" \
+        >> "${WORK_DIR}/export-stage/${LANG_CODE}/.addon-build-info"
     node -p 'JSON.stringify({compiler: require("./node_modules/@typespec/compiler/package.json").version, emitter: require("./node_modules/@ebusd/ebus-typespec/package.json").version})' \
         >> "${WORK_DIR}/export-stage/${LANG_CODE}/.addon-build-info"
     bashio::log.info "${LANG_CODE}: ${COUNT} CSV-Dateien bereitgestellt."
 done
 
-# Publish only after every requested language has compiled successfully.
+# Publish only after every requested language has usable output. A nonzero
+# compiler exit is accepted solely with the explicit ignore option.
 mkdir -p "${OUTPUT_PATH}"
 for LANG_CODE in ${LANGUAGES}; do
     TARGET="${OUTPUT_PATH}/${LANG_CODE}"
@@ -146,4 +170,8 @@ for LANG_CODE in ${LANGUAGES}; do
     fi
     rm -rf -- "${STAGE}.previous"
 done
-bashio::log.info "Fertig. CSV-Dateien für Commit ${SOURCE_SHA} unter ${OUTPUT_PATH} exportiert."
+if [ "${ANY_COMPILE_ERRORS}" = true ]; then
+    bashio::log.warning "Export mit ignorierten Compilerfehlern abgeschlossen: Commit ${SOURCE_SHA} unter ${OUTPUT_PATH}. Dies ist KEIN erfolgreicher Compile-Test; CSVs vor produktiver Nutzung prüfen."
+else
+    bashio::log.info "Fertig. CSV-Dateien für Commit ${SOURCE_SHA} unter ${OUTPUT_PATH} exportiert."
+fi
