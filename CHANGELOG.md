@@ -1,31 +1,41 @@
-# Änderungen
+# Changelog
+
+## 1.6.1
+
+- Documentation switched to English: `DOCS.md`, `CHANGELOG.md`, and a new
+  short `README.md`.
+- New add-on logo and icon (original design: code brackets with a two-wire
+  eBUS bus), referenced from `config.yaml`.
+- No functional changes.
 
 ## 1.6.0
 
-- Neue Option `ignore_compile_errors`, standardmäßig `false`: Mit `true` können
-  trotz Compilerfehlern erzeugte CSV-Dateien exportiert werden, etwa bei
+- New option `ignore_compile_errors`, default `false`: With `true`, CSV files
+  generated despite compiler errors can be exported, for example for
   `ebus/duplicate-id` in `src/tem/15.tsp`.
-- Compilerdiagnosen bleiben sichtbar; ignorierte Fehler werden pro Sprache in
-  `.addon-build-info` und als ausdrückliche Warnung im Abschluss protokolliert.
-- Unterstützt Gesamtrepo-Builds und den direkten `entrypoint`-Modus.
-- Fehlende/leere Ausgaben sowie Checkout-, Installations- und
-  Toolchain-Fehler bleiben fatal. Exporte erfolgen erst, wenn jede angeforderte
-  Sprache CSV-Dateien bereitgestellt hat.
-- Regressionstests für Opt-in, strikt bleibenden Standard, fehlende Ausgaben
-  und zurückgesetzte Fehlerzustände ergänzt.
+- Compiler diagnostics remain visible; ignored errors are recorded per
+  language in `.addon-build-info` and logged as an explicit warning at the end.
+- Supports whole-repository builds and the direct `entrypoint` mode.
+- Missing/empty outputs as well as checkout, installation, and toolchain
+  errors remain fatal. Exports only happen once every requested language has
+  provided CSV files.
+- Added regression tests for the opt-in, the still-strict default, missing
+  outputs, and reset error states.
 
 ## 1.5.0
 
-- Beliebige Fork-Branches und GitHub-PR-Refs über Git-Fetch auswählbar, inklusive
-  `pull/<Nummer>/head` und `pull/<Nummer>/merge`.
-- Standardmodus `compatible` wählt Compiler, ebusd-Emitter und Asset-Emitter
-  gemeinsam innerhalb der Versionsvorgaben des jeweiligen Quell-Repositories.
-  Anpassungen betreffen nur das temporäre Manifest, nicht den Fork oder PR.
-- Modus `repository` für unveränderte Manifest-/Lockfile-Prüfungen.
-- Optionaler `entrypoint` für gezielte `.tsp`-Tests statt eines Gesamtrepo-Builds.
-- Exakter Quell-Commit und Toolchain-Versionen werden protokolliert und im
-  Export als `.addon-build-info` festgehalten.
-- Exporte werden erst nach erfolgreicher Kompilierung aller gewählten Sprachen
-  ersetzt; echte Compilerfehler bleiben Fehler.
-- Schema für die Liste der Sprachen korrigiert. Kein globaler Compiler-Fallback.
-- Resolver- und Runner-Regressionstests sowie Live-Test-Harness hinzugefügt.
+- Arbitrary fork branches and GitHub PR refs selectable via Git fetch,
+  including `pull/<number>/head` and `pull/<number>/merge`.
+- Default mode `compatible` selects compiler, ebusd emitter, and asset
+  emitter together within the version constraints of the respective source
+  repository. Adjustments only affect the temporary manifest, not the fork
+  or PR.
+- Mode `repository` for unchanged manifest/lockfile checks.
+- Optional `entrypoint` for targeted `.tsp` tests instead of a
+  whole-repository build.
+- Exact source commit and toolchain versions are logged and stored in the
+  export as `.addon-build-info`.
+- Exports are only replaced after all selected languages compiled
+  successfully; real compiler errors remain errors.
+- Fixed the schema for the language list. No global compiler fallback.
+- Added resolver and runner regression tests plus a live test harness.

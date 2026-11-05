@@ -1,27 +1,26 @@
 # ebusd TypeSpec Compiler
 
-Dieses Add-on testet TypeSpec-Konfigurationen aus Git-Repositories und exportiert
-erfolgreich kompilierte CSV-Dateien für ebusd. Forks, normale Branches und GitHub-
-Pull-Request-Refs können ausgewählt werden; ein Wechsel auf einen bestimmten
-Fork ist nicht erforderlich.
+This add-on tests TypeSpec configurations from Git repositories and exports
+successfully compiled CSV files for ebusd. Forks, regular branches, and GitHub
+pull request refs can be selected; switching to a specific fork is not required.
 
-## Konfiguration
+## Configuration
 
-| Option | Standard | Bedeutung |
-|--------|----------|-----------|
-| `repo_url` | `https://github.com/john30/ebusd-configuration` | Repository mit den zu prüfenden Quellen |
-| `branch` | `master` | Branch, Tag, erreichbare Commit-ID oder Git-Ref |
-| `dependency_mode` | `compatible` | Passende Toolchain innerhalb der Repository-Versionsvorgaben auswählen; `repository` übernimmt Manifest und Lockfile unverändert |
-| `ignore_compile_errors` | `false` | Bei `true` trotz fehlgeschlagenem Compile bereits erzeugte CSVs exportieren; Warnungen und Fehlerstatus bleiben sichtbar |
-| `entrypoint` | `""` | Leer: vollständiger Build über die Repository-Skripte. Sonst relativer Pfad zu einer einzelnen `.tsp`-Einstiegsdatei |
-| `languages` | `[de, en]` | Zu kompilierende Sprachen |
-| `output_path` | `/config/ebusd-configuration` | Basisverzeichnis für die Unterordner `de` und `en` |
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `repo_url` | `https://github.com/john30/ebusd-configuration` | Repository containing the sources to check |
+| `branch` | `master` | Branch, tag, reachable commit ID, or Git ref |
+| `dependency_mode` | `compatible` | Select a matching toolchain within the repository's version constraints; `repository` uses the manifest and lockfile unchanged |
+| `ignore_compile_errors` | `false` | When `true`, export already generated CSVs despite a failed compile; warnings and error status remain visible |
+| `entrypoint` | `""` | Empty: full build via the repository scripts. Otherwise a relative path to a single `.tsp` entry file |
+| `languages` | `[de, en]` | Languages to compile |
+| `output_path` | `/config/ebusd-configuration` | Base directory for the `de` and `en` subfolders |
 
-`output_path` muss in einem eingebundenen Verzeichnis liegen, beispielsweise
-unter `/config` oder `/share`. Das Add-on startet nicht automatisch beim
-Home-Assistant-Start und beendet sich nach seinem Durchlauf.
+`output_path` must be inside a mapped directory, for example under `/config`
+or `/share`. The add-on does not start automatically when Home Assistant
+starts and exits after its run.
 
-### Einen Pull Request bei john30 prüfen
+### Checking a pull request against john30
 
 ```yaml
 repo_url: https://github.com/john30/ebusd-configuration
@@ -32,67 +31,66 @@ languages:
 output_path: /share/ebusd/pr-test
 ```
 
-`123` ist ein Platzhalter für die PR-Nummer. `pull/123/head` lädt den
-Quell-Commit des Pull Requests direkt aus dem Ziel-Repository, auch wenn der
-PR aus einem Fork stammt; alternativ ist `refs/pull/123/head` möglich.
-Das GitHub-Format dieser Refs ist in der
-[GitHub-Dokumentation](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/checking-out-pull-requests-locally)
-beschrieben.
+`123` is a placeholder for the PR number. `pull/123/head` fetches the source
+commit of the pull request directly from the target repository, even if the
+PR originates from a fork; `refs/pull/123/head` works as well. The GitHub
+format of these refs is described in the
+[GitHub documentation](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/checking-out-pull-requests-locally).
 
-`pull/123/merge` prüft stattdessen GitHubs Test-Merge mit dem Zielbranch.
-Diese Ref ist nicht immer verfügbar, etwa bei Merge-Konflikten. Für einen
-normalen Fork werden dessen `repo_url` und Branch-Name eingetragen.
+`pull/123/merge` instead checks GitHub's test merge against the target branch.
+This ref is not always available, for example on merge conflicts. For a
+regular fork, enter that fork's `repo_url` and branch name.
 
-## Abhängigkeiten und reproduzierbare Prüfungen
+## Dependencies and reproducible checks
 
-- **`compatible`:** Ermittelt veröffentlichte Compiler-, ebusd-Emitter- und
-  Asset-Emitter-Versionen über npm. Ausgewählt wird die neueste kompatible
-  Kombination innerhalb der im Quell-Repository deklarierten Compiler- und
-  Emitter-Bereiche und passend zur vorhandenen Node-Version. Die entsprechenden
-  Pins und Overrides werden ausschließlich im temporären Checkout gesetzt.
-  Dessen Lockfiles werden für diese Auflösung entfernt, die `.tsp`-Dateien und
-  npm-Skripte bleiben unverändert.
-- **`repository`:** Verändert keine Abhängigkeitsvorgaben. Mit vorhandenem
-  `package-lock.json` oder `npm-shrinkwrap.json` wird `npm ci` ausgeführt,
-  andernfalls `npm install`. Dieser Modus eignet sich für die exakte Prüfung
-  des Repository-Manifests; vorhandene Peer-Konflikte führen zum Fehler.
+- **`compatible`:** Resolves published compiler, ebusd emitter, and asset
+  emitter versions via npm. The newest compatible combination is selected
+  within the compiler and emitter ranges declared by the source repository
+  and matching the installed Node version. The corresponding pins and
+  overrides are applied only in the temporary checkout. Its lockfiles are
+  removed for this resolution; the `.tsp` files and npm scripts remain
+  unchanged.
+- **`repository`:** Does not modify any dependency constraints. With an
+  existing `package-lock.json` or `npm-shrinkwrap.json`, `npm ci` is run,
+  otherwise `npm install`. This mode is suited for exactly checking the
+  repository manifest; existing peer conflicts cause the run to fail.
 
-Der Unterschied ist absichtlich sichtbar: Ein erfolgreicher `compatible`-
-Durchlauf bestätigt die Quellen mit der protokollierten Toolchain, nicht die
-Fehlerfreiheit des unveränderten Abhängigkeitsmanifests oder des CI-Builds.
-Eine mit `repository` gefundene Abhängigkeitsstörung ist weiterhin ein
-berichtenswerter Befund zum Pull Request.
+The difference is intentionally visible: a successful `compatible` run
+confirms the sources with the logged toolchain, not the correctness of the
+unchanged dependency manifest or the CI build. A dependency problem found
+with `repository` is still a reportable finding for the pull request.
 
-Es werden keine Versionsgrenzen ungefragt erweitert. Wenn ein PR unvereinbare
-exakte Pins enthält, schlägt die Prüfung weiterhin fehl. Fehlerhafter TypeSpec-
-Code führt standardmäßig ebenfalls zum Abbruch; ab Version 1.6.0 kann für den
-Export vorhandener CSVs ausdrücklich `ignore_compile_errors: true` gesetzt
-werden. Dieser Export ist kein erfolgreicher Compile-Test.
-Git-/Datei-Abhängigkeiten statt npm-Semver-Bereichen sind im Kompatibilitätsmodus
-nicht unterstützt; dafür steht `repository` bereit.
+Version ranges are never widened on their own. If a PR contains incompatible
+exact pins, the check still fails. Faulty TypeSpec code also aborts by
+default; as of version 1.6.0 `ignore_compile_errors: true` can be set
+explicitly to export existing CSVs. This export is not a successful compile
+test.
+Git/file dependencies instead of npm semver ranges are not supported in
+compatibility mode; use `repository` for those.
 
-Im Log stehen Repository, gewählte Ref, exakter Quell-Commit und Toolchain.
-Jeder Sprachordner enthält zusätzlich `.addon-build-info` mit Commit und
-Compiler-/Emitter-Versionen. Der Build-Helper benötigt Node.js ab Version 22.
+The log contains repository, selected ref, exact source commit, and toolchain.
+Each language folder additionally contains `.addon-build-info` with the commit
+and compiler/emitter versions. The build helper requires Node.js version 22
+or later.
 
-## Ablauf und Export
+## Flow and export
 
-Das Repository muss `maintsp` und je gewünschter Sprache `compile-de` oder
-`compile-en` in `package.json` definieren und die lokale TypeSpec-/ebusd-
-Toolchain deklarieren. Installations-Lifecycle-Skripte werden deaktiviert,
-die expliziten `maintsp`-/`compile-*`-Skripte jedoch ausgeführt.
+The repository must define `maintsp` and, per requested language, `compile-de`
+or `compile-en` in `package.json`, and declare the local TypeSpec/ebusd
+toolchain. Install lifecycle scripts are disabled, but the explicit
+`maintsp`/`compile-*` scripts are executed.
 
-Alle ausgewählten Sprachen werden zunächst temporär kompiliert. Standardmäßig
-werden die Sprachordner unter `output_path` erst ersetzt, wenn alle Sprachen
-erfolgreich sind und CSV-Dateien erzeugt haben. Ein Compilerfehler lässt
-vorherige Exporte unverändert. Mit `ignore_compile_errors: true` genügt pro
-Sprache eine vorhandene, nicht leere CSV-Ausgabe, auch bei Compiler-Exitcode
-ungleich null. Der Inhalt der CSVs wird dabei nicht als fehlerfrei validiert.
+All selected languages are compiled to a temporary location first. By default,
+the language folders under `output_path` are only replaced once all languages
+succeeded and produced CSV files. A compiler error leaves previous exports
+unchanged. With `ignore_compile_errors: true`, one existing, non-empty CSV
+output per language is sufficient, even with a compiler exit code other than
+zero. The content of the CSVs is not validated as error-free in that case.
 
-Für produktives ebusd beispielsweise `--configpath /config/ebusd-configuration/en`
-verwenden. Zum Prüfen von PRs besser einen eigenen Test-Ausgabepfad wählen.
+For a productive ebusd, for example use `--configpath /config/ebusd-configuration/en`.
+For checking PRs, prefer a dedicated test output path.
 
-### CSVs trotz Compilerfehlern exportieren
+### Exporting CSVs despite compiler errors
 
 ```yaml
 repo_url: https://github.com/john30/ebusd-configuration
@@ -105,49 +103,49 @@ languages:
 output_path: /share/ebusd/ebusd-configuration
 ```
 
-Diese Option ist beispielsweise für einen Durchlauf mit `ebus/duplicate-id`-
-Diagnosen gedacht, bei dem der Emitter dennoch CSVs schreibt. Sie repariert
-weder doppelte IDs noch andere TypeSpec-Fehler und entfernt keine betroffenen
-Definitionen aus den Dateien. Die CSVs können unvollständig oder für ebusd
-mehrdeutig/ungültig sein. Vor produktiver Nutzung prüfen.
+This option is intended, for example, for a run with `ebus/duplicate-id`
+diagnostics where the emitter still writes CSVs. It does not repair duplicate
+IDs or other TypeSpec errors and does not remove affected definitions from
+the files. The CSVs may be incomplete or ambiguous/invalid for ebusd. Review
+before productive use.
 
-Die Diagnosen bleiben im Log sichtbar. Pro Sprache enthält `.addon-build-info`
-zusätzlich `ignore_compile_errors`, `compile_exit_code` und
-`compile_errors_ignored`. Bei übernommenen Compilerfehlern endet das Add-on
-nach dem Export regulär mit Exitcode 0, aber mit einer ausdrücklichen Warnung,
-dass dies kein erfolgreicher Compile-Test ist.
+The diagnostics remain visible in the log. Per language, `.addon-build-info`
+additionally contains `ignore_compile_errors`, `compile_exit_code`, and
+`compile_errors_ignored`. When compiler errors are accepted, the add-on ends
+after the export regularly with exit code 0, but with an explicit warning
+that this is not a successful compile test.
 
-Die Option übergeht ausschließlich einen Fehlerstatus des Compile-Kommandos,
-nicht Fehler beim Git-Checkout, der Toolchain-Auflösung, Installation oder
-Erzeugung von `src/main.tsp`. Fehlende, leere oder mehrdeutige Ausgabeverzeichnisse
-führen weiterhin zum Abbruch. Fehlt für eine angeforderte Sprache die
-CSV-Ausgabe, werden auch die bereits vorbereiteten anderen Sprachen nicht
-exportiert; bestehende Exporte bleiben unverändert.
+The option only bypasses a failure status of the compile command, not errors
+during Git checkout, toolchain resolution, installation, or generation of
+`src/main.tsp`. Missing, empty, or ambiguous output directories still abort
+the run. If a requested language has no CSV output, the other already
+prepared languages are not exported either; existing exports remain
+unchanged.
 
-### Einzelne Konfiguration statt Gesamtrepository testen
+### Testing a single configuration instead of the whole repository
 
-Bei `entrypoint: src/vaillant/08.hmu.tsp` wird diese Datei samt ihren Imports
-direkt mit dem lokalen ebusd-Emitter kompiliert. `maintsp` und die `compile-*`-
-Skripte werden dafür nicht aufgerufen; Deutsch verwendet `src/de.yaml`.
-So können PR-Änderungen gezielt geprüft werden, auch wenn andere, nicht
-importierte Konfigurationen im Gesamtrepository fehlerhaft sind.
+With `entrypoint: src/vaillant/08.hmu.tsp`, that file and its imports are
+compiled directly with the local ebusd emitter. `maintsp` and the `compile-*`
+scripts are not called for this; German uses `src/de.yaml`. This allows
+targeted checking of PR changes even if other, non-imported configurations
+in the whole repository are faulty.
 
-Dieser gezielte Test ist kein erfolgreicher Gesamtrepository-Build. Das Log
-und `.addon-build-info` halten den gewählten Einstiegspunkt ausdrücklich fest.
-Leer lassen, um weiterhin das gesamte Repository zu prüfen.
+This targeted test is not a successful whole-repository build. The log and
+`.addon-build-info` explicitly record the selected entry point. Leave empty
+to keep checking the entire repository.
 
-## Sicherheit und Grenzen
+## Security and limits
 
-PRs und Forks können beliebige npm-Skripte enthalten. Nur vertrauenswürdige
-Quellen ausführen: Das Add-on hat Schreibzugriff auf `/config` und `/share`;
-es ist keine Sandbox für fremden Code. Insbesondere dürfen unkontrollierte
-PRs nicht allein wegen des deaktivierten Installations-Hooks als sicher gelten.
+PRs and forks can contain arbitrary npm scripts. Only run trusted sources:
+the add-on has write access to `/config` and `/share`; it is not a sandbox
+for foreign code. In particular, unreviewed PRs must not be considered safe
+just because the install hook is disabled.
 
-Ein echter Home-Assistant-Container-Build prüft zusätzlich APK-Pakete,
-Bashio und s6-Integration. Die automatisierten Tests im Repository prüfen
-Toolchain-Auswahl und Runner-Verhalten, ersetzen aber diese Integration nicht.
+A real Home Assistant container build additionally verifies APK packages,
+Bashio, and s6 integration. The automated tests in this repository check
+toolchain selection and runner behavior, but do not replace that integration.
 
-## Entwicklung und Tests
+## Development and tests
 
 ```sh
 npm ci --prefix rootfs/opt/ebusd-typespec-compiler
@@ -155,6 +153,6 @@ npm test --prefix rootfs/opt/ebusd-typespec-compiler
 bash tests/runner.test.sh
 ```
 
-`tests/live-runner.sh <repo_url> <ref> <sprachen> [entrypoint]` führt die echte
-Fetch-/Installations-/Compile-/Export-Pipeline ohne Home Assistant aus.
-Nur das Herunterfahren und Bashio-Konfigurationsaufrufe werden ersetzt.
+`tests/live-runner.sh <repo_url> <ref> <languages> [entrypoint]` runs the real
+fetch/install/compile/export pipeline without Home Assistant. Only shutdown
+and Bashio configuration calls are replaced.
