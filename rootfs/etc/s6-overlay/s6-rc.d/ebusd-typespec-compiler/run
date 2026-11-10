@@ -17,9 +17,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-bashio::log.info "ebusd TypeSpec Compiler wird gestartet."
+bashio::log.info "Starting ebusd TypeSpec Compiler."
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-[ "${NODE_MAJOR}" -ge 22 ] || fail "Node.js >= 22 erforderlich. Bitte Add-on-Image neu bauen."
+[ "${NODE_MAJOR}" -ge 22 ] || fail "Node.js >= 22 required. Please rebuild the add-on image."
 
 REPO_URL=$(bashio::config 'repo_url')
 BRANCH=$(bashio::config 'branch')
@@ -33,25 +33,25 @@ DEPENDENCY_MODE=${DEPENDENCY_MODE:-compatible}
 IGNORE_COMPILE_ERRORS=${IGNORE_COMPILE_ERRORS:-false}
 case "${IGNORE_COMPILE_ERRORS}" in
     true|false) ;;
-    *) fail "ignore_compile_errors muss true oder false sein." ;;
+    *) fail "ignore_compile_errors must be true or false." ;;
 esac
 ANY_COMPILE_ERRORS=false
 case "${DEPENDENCY_MODE}" in
     compatible|repository) ;;
-    *) fail "Unbekannter dependency_mode: ${DEPENDENCY_MODE}" ;;
+    *) fail "Unknown dependency_mode: ${DEPENDENCY_MODE}" ;;
 esac
 for LANG_CODE in ${LANGUAGES}; do
     case "${LANG_CODE}" in
         de|en) ;;
-        *) fail "Nicht unterstützte Sprache: ${LANG_CODE}" ;;
+        *) fail "Unsupported language: ${LANG_CODE}" ;;
     esac
 done
 
 bashio::log.info "Repository: ${REPO_URL}"
-bashio::log.info "Git-Ref: ${BRANCH}; Sprachen: ${LANGUAGES}; Abhängigkeiten: ${DEPENDENCY_MODE}"
-bashio::log.info "Ausgabe: ${OUTPUT_PATH}"
+bashio::log.info "Git ref: ${BRANCH}; languages: ${LANGUAGES}; dependencies: ${DEPENDENCY_MODE}"
+bashio::log.info "Output: ${OUTPUT_PATH}"
 if [ "${IGNORE_COMPILE_ERRORS}" = true ]; then
-    bashio::log.warning "ignore_compile_errors ist aktiv: Trotz Compilerfehlern erzeugte CSVs dürfen exportiert werden. Sie können unvollständig sein oder ungültige/mehrdeutige Definitionen enthalten."
+    bashio::log.warning "ignore_compile_errors is enabled: CSVs generated despite compiler errors may be exported. They can be incomplete or contain invalid/ambiguous definitions."
 fi
 WORK_DIR=$(mktemp -d /tmp/ebusd-typespec-src.XXXXXX)
 
@@ -61,37 +61,37 @@ case "${BRANCH}" in
     pull/*) FETCH_REF="refs/${BRANCH}" ;;
     *) FETCH_REF="${BRANCH}" ;;
 esac
-[ -n "${FETCH_REF}" ] && [[ "${FETCH_REF}" != -* ]] || fail "Ungültige Git-Ref."
+[ -n "${FETCH_REF}" ] && [[ "${FETCH_REF}" != -* ]] || fail "Invalid Git ref."
 git init -q "${WORK_DIR}"
 git -C "${WORK_DIR}" remote add origin "${REPO_URL}"
-git -C "${WORK_DIR}" fetch --depth=1 origin "${FETCH_REF}" || fail "Git-Ref konnte nicht geladen werden."
+git -C "${WORK_DIR}" fetch --depth=1 origin "${FETCH_REF}" || fail "Could not fetch Git ref."
 git -C "${WORK_DIR}" checkout -q --detach FETCH_HEAD
 SOURCE_SHA=$(git -C "${WORK_DIR}" rev-parse HEAD)
-bashio::log.info "Quell-Commit: ${SOURCE_SHA}"
+bashio::log.info "Source commit: ${SOURCE_SHA}"
 cd "${WORK_DIR}"
 
 if [ "${DEPENDENCY_MODE}" = compatible ]; then
-    bashio::log.info "Kompatible Toolchain innerhalb der Versionsvorgaben des Quell-Repos wird ermittelt."
+    bashio::log.info "Resolving a compatible toolchain within the source repository's version constraints."
     node /opt/ebusd-typespec-compiler/resolve-toolchain.mjs "${WORK_DIR}" \
-        || fail "Keine kompatible Toolchain ermittelt. Details siehe oben."
+        || fail "No compatible toolchain found. See details above."
 fi
 
 # A locked repository-mode run is intentionally strict for reproducing CI.
 # Do not run arbitrary npm install lifecycle scripts from a PR.
 if [ "${DEPENDENCY_MODE}" = repository ] && { [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; }; then
-    npm ci --ignore-scripts --no-audit --no-fund || fail "npm ci fehlgeschlagen."
+    npm ci --ignore-scripts --no-audit --no-fund || fail "npm ci failed."
 else
-    npm install --ignore-scripts --no-audit --no-fund || fail "npm install fehlgeschlagen."
+    npm install --ignore-scripts --no-audit --no-fund || fail "npm install failed."
 fi
 
 if ! npm ls --all > "${WORK_DIR}/dependency-tree.log" 2>&1; then
     cat "${WORK_DIR}/dependency-tree.log"
-    fail "Abhängigkeitsbaum ist inkonsistent. Details siehe oben."
+    fail "Dependency tree is inconsistent. See details above."
 fi
 [ -f node_modules/@typespec/compiler/cmd/tsp.js ] \
-    || fail "Lokaler TypeSpec-Compiler fehlt; kein automatischer npx-Download erlaubt."
-[ -f node_modules/@ebusd/ebus-typespec/package.json ] || fail "Lokaler ebusd-Emitter fehlt."
-node -p '"Installiert: compiler " + require("./node_modules/@typespec/compiler/package.json").version + ", emitter " + require("./node_modules/@ebusd/ebus-typespec/package.json").version'
+    || fail "Local TypeSpec compiler missing; automatic npx download is not allowed."
+[ -f node_modules/@ebusd/ebus-typespec/package.json ] || fail "Local ebusd emitter missing."
+node -p '"Installed: compiler " + require("./node_modules/@typespec/compiler/package.json").version + ", emitter " + require("./node_modules/@ebusd/ebus-typespec/package.json").version'
 
 if [ -n "${ENTRYPOINT}" ]; then
     # Do not allow selecting a file outside the checked-out repository.
@@ -101,22 +101,22 @@ if [ -n "${ENTRYPOINT}" ]; then
       const file = fs.realpathSync(path.resolve(base, process.argv[2]));
       if (!file.startsWith(base + path.sep) || !file.endsWith(".tsp") || !fs.statSync(file).isFile()) process.exit(1);
       console.log(file);
-    ' "${WORK_DIR}" "${ENTRYPOINT}") || fail "Einstiegspunkt muss eine vorhandene .tsp-Datei innerhalb des Repos sein."
-    bashio::log.info "Gezielter Test: ${ENTRYPOINT#${WORK_DIR}/} (kein vollständiger Repository-Build)"
+    ' "${WORK_DIR}" "${ENTRYPOINT}") || fail "Entrypoint must be an existing .tsp file inside the repository."
+    bashio::log.info "Targeted test: ${ENTRYPOINT#${WORK_DIR}/} (not a full repository build)"
 else
-    npm run maintsp || fail "Erzeugen von src/main.tsp fehlgeschlagen."
+    npm run maintsp || fail "Generating src/main.tsp failed."
 fi
 mkdir "${WORK_DIR}/export-stage"
 for LANG_CODE in ${LANGUAGES}; do
     # Discard generated output from the source checkout or the previous language.
     rm -rf -- "${WORK_DIR}/outcsv"*
-    bashio::log.info "Kompilierung: ${LANG_CODE}"
+    bashio::log.info "Compiling: ${LANG_CODE}"
     COMPILE_EXIT=0
     COMPILE_ERRORS_IGNORED=false
     if [ -n "${ENTRYPOINT}" ]; then
         COMPILE_ARGS=(compile --emit @ebusd/ebus-typespec "${ENTRYPOINT}" --output-dir outcsv)
         if [ "${LANG_CODE}" = de ]; then
-            [ -f src/de.yaml ] || fail "Übersetzungsdatei src/de.yaml fehlt."
+            [ -f src/de.yaml ] || fail "Translation file src/de.yaml is missing."
             COMPILE_ARGS+=(--option @ebusd/ebus-typespec.translations=src/de.yaml)
         fi
         node node_modules/@typespec/compiler/cmd/tsp.js "${COMPILE_ARGS[@]}" \
@@ -127,19 +127,19 @@ for LANG_CODE in ${LANGUAGES}; do
     fi
     if [ "${COMPILE_EXIT}" -ne 0 ]; then
         if [ "${IGNORE_COMPILE_ERRORS}" != true ]; then
-            fail "TypeSpec-Kompilierung für ${LANG_CODE} fehlgeschlagen (Exitcode ${COMPILE_EXIT}). Quellfehler werden nicht ignoriert; bestehende Exporte bleiben unverändert."
+            fail "TypeSpec compilation for ${LANG_CODE} failed (exit code ${COMPILE_EXIT}). Source errors are not ignored; existing exports remain unchanged."
         fi
         COMPILE_ERRORS_IGNORED=true
         ANY_COMPILE_ERRORS=true
-        bashio::log.warning "Kompilierung für ${LANG_CODE} mit Exitcode ${COMPILE_EXIT} fehlgeschlagen. Wegen ignore_compile_errors=true werden ausschließlich bereits erzeugte CSVs exportiert, sofern vorhanden. Die Fehler sind NICHT behoben."
+        bashio::log.warning "Compilation for ${LANG_CODE} failed with exit code ${COMPILE_EXIT}. Because ignore_compile_errors=true, only CSVs already generated will be exported, if any. The errors are NOT fixed."
     fi
     mapfile -t OUTPUT_DIRS < <(find "${WORK_DIR}" -type d -name ebus-typespec \
         -path '*/@ebusd/*' ! -path '*/node_modules/*')
     [ "${#OUTPUT_DIRS[@]}" -eq 1 ] \
-        || fail "Erwartet wurde genau ein Compiler-Ausgabeverzeichnis, gefunden: ${#OUTPUT_DIRS[@]}"
+        || fail "Expected exactly one compiler output directory, found: ${#OUTPUT_DIRS[@]}"
     OUT_SRC=${OUTPUT_DIRS[0]}
     COUNT=$(find "${OUT_SRC}" -type f -name '*.csv' | wc -l)
-    [ "${COUNT}" -gt 0 ] || fail "Keine CSV-Dateien für ${LANG_CODE} erzeugt."
+    [ "${COUNT}" -gt 0 ] || fail "No CSV files generated for ${LANG_CODE}."
     mkdir "${WORK_DIR}/export-stage/${LANG_CODE}"
     cp -r "${OUT_SRC}/." "${WORK_DIR}/export-stage/${LANG_CODE}/"
     # Keep a reproducibility record alongside each language's output.
@@ -151,7 +151,7 @@ for LANG_CODE in ${LANGUAGES}; do
         >> "${WORK_DIR}/export-stage/${LANG_CODE}/.addon-build-info"
     node -p 'JSON.stringify({compiler: require("./node_modules/@typespec/compiler/package.json").version, emitter: require("./node_modules/@ebusd/ebus-typespec/package.json").version})' \
         >> "${WORK_DIR}/export-stage/${LANG_CODE}/.addon-build-info"
-    bashio::log.info "${LANG_CODE}: ${COUNT} CSV-Dateien bereitgestellt."
+    bashio::log.info "${LANG_CODE}: ${COUNT} CSV files provided."
 done
 
 # Publish only after every requested language has usable output. A nonzero
@@ -166,12 +166,12 @@ for LANG_CODE in ${LANGUAGES}; do
     fi
     if ! mv -- "${STAGE}" "${TARGET}"; then
         if [ -e "${STAGE}.previous" ]; then mv -- "${STAGE}.previous" "${TARGET}"; fi
-        fail "Export nach ${TARGET} fehlgeschlagen."
+        fail "Export to ${TARGET} failed."
     fi
     rm -rf -- "${STAGE}.previous"
 done
 if [ "${ANY_COMPILE_ERRORS}" = true ]; then
-    bashio::log.warning "Export mit ignorierten Compilerfehlern abgeschlossen: Commit ${SOURCE_SHA} unter ${OUTPUT_PATH}. Dies ist KEIN erfolgreicher Compile-Test; CSVs vor produktiver Nutzung prüfen."
+    bashio::log.warning "Export completed with ignored compiler errors: commit ${SOURCE_SHA} under ${OUTPUT_PATH}. This is NOT a successful compile test; review the CSVs before productive use."
 else
-    bashio::log.info "Fertig. CSV-Dateien für Commit ${SOURCE_SHA} unter ${OUTPUT_PATH} exportiert."
+    bashio::log.info "Done. CSV files for commit ${SOURCE_SHA} exported to ${OUTPUT_PATH}."
 fi

@@ -7,6 +7,7 @@ TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
 export TEST_DIR
 export RUN_FILE="$TEST_DIR/run"
+
 sed 's|/run/s6/basedir/bin/halt|true|' \
     "$ROOT/rootfs/etc/s6-overlay/s6-rc.d/ebusd-typespec-compiler/run" > "$RUN_FILE"
 
@@ -93,52 +94,52 @@ export BRANCH_CFG=main MISSING_LANGUAGES=1
 bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1
 test -f "$OUT_CFG/de/test.csv"
 test -f "$OUT_CFG/en/test.csv"
-echo "PASS fehlende languages-Option verwendet de/en"
+echo "PASS missing languages option defaults to de/en"
 unset MISSING_LANGUAGES
 
-printf 'vorheriger-export\n' > "$OUT_CFG/de/test.csv"
-printf 'vorheriger-export\n' > "$OUT_CFG/en/test.csv"
+printf 'previous-export\n' > "$OUT_CFG/de/test.csv"
+printf 'previous-export\n' > "$OUT_CFG/en/test.csv"
 export LANGS_CFG="de en" FAIL_LANGUAGE=en
 if bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1; then
-    echo "FAIL fehlgeschlagener Compile wurde als Erfolg gemeldet"; exit 1
+    echo "FAIL failed compile reported as success"; exit 1
 fi
-grep -q '^vorheriger-export' "$OUT_CFG/de/test.csv"
-grep -q '^vorheriger-export' "$OUT_CFG/en/test.csv"
-echo "PASS Compilerfehler lässt beide vorherigen Exporte unverändert"
+grep -q '^previous-export' "$OUT_CFG/de/test.csv"
+grep -q '^previous-export' "$OUT_CFG/en/test.csv"
+echo "PASS compile error leaves both previous exports unchanged"
 unset FAIL_LANGUAGE
 
 export BRANCH_CFG=pull/999/head
 if bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1; then
-    echo "FAIL ungültige PR-Ref wurde akzeptiert"; exit 1
+    echo "FAIL invalid PR ref accepted"; exit 1
 fi
-echo "PASS nicht vorhandene PR-Ref schlägt fehl"
+echo "PASS nonexistent PR ref fails"
 export BRANCH_CFG=main LANGS_CFG="../unsafe"
 if bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1; then
-    echo "FAIL unsichere Sprache wurde akzeptiert"; exit 1
+    echo "FAIL unsafe language accepted"; exit 1
 fi
-echo "PASS ungültige Sprache wird vor Checkout abgelehnt"
+echo "PASS invalid language rejected before checkout"
 
 export LANGS_CFG="de en" ENTRYPOINT_CFG=src/test.tsp
 bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1
 grep -q '^direct compiler' "$OUT_CFG/de/test.csv"
 grep -q '^direct compiler' "$OUT_CFG/en/test.csv"
 grep -q '^entrypoint=src/test.tsp' "$OUT_CFG/en/.addon-build-info"
-echo "PASS direkter Einstiegspunkt mit de/en und Herkunftsnachweis"
+echo "PASS direct entrypoint with de/en and provenance record"
 
 export ENTRYPOINT_CFG=../outside.tsp
 if bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1; then
-    echo "FAIL externer Einstiegspunkt wurde akzeptiert"; exit 1
+    echo "FAIL external entrypoint accepted"; exit 1
 fi
 grep -q '^direct compiler' "$OUT_CFG/en/test.csv"
-echo "PASS externer Einstiegspunkt abgelehnt, Export unverändert"
+echo "PASS external entrypoint rejected, export unchanged"
 unset ENTRYPOINT_CFG
 
 export LANGS_CFG="de en" FAIL_LANGUAGE=en FAIL_WITH_OUTPUT=1
 if bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1; then
-    echo "FAIL ohne Opt-in wurden fehlerhafte CSVs exportiert"; exit 1
+    echo "FAIL faulty CSVs exported without opt-in"; exit 1
 fi
 grep -q '^direct compiler' "$OUT_CFG/en/test.csv"
-echo "PASS fehlende Option bleibt strikt, auch wenn fehlerhafter Compiler CSVs erzeugt"
+echo "PASS missing option stays strict even when the failing compiler produces CSVs"
 
 export IGNORE_ERRORS_CFG=true
 bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1
@@ -147,32 +148,32 @@ grep -q '^compile_exit_code=7$' "$OUT_CFG/en/.addon-build-info"
 grep -q '^compile_errors_ignored=true$' "$OUT_CFG/en/.addon-build-info"
 grep -q '^compile_exit_code=0$' "$OUT_CFG/de/.addon-build-info"
 grep -q '^compile_errors_ignored=false$' "$OUT_CFG/de/.addon-build-info"
-grep -q 'KEIN erfolgreicher Compile-Test' "$TEST_DIR/log"
-echo "PASS Opt-in exportiert erzeugte CSVs mit Warnung und sprachspezifischem Fehlerstatus"
+grep -q 'NOT a successful compile test' "$TEST_DIR/log"
+echo "PASS opt-in exports generated CSVs with warning and per-language error status"
 
 export FAIL_WITH_OUTPUT=0
 if bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1; then
-    echo "FAIL Opt-in akzeptierte Compilerfehler ohne Ausgabeverzeichnis"; exit 1
+    echo "FAIL opt-in accepted compiler error without output directory"; exit 1
 fi
 grep -q '^compile_exit_code=7$' "$OUT_CFG/en/.addon-build-info"
-echo "PASS Compilerfehler ohne Ausgabe bleiben fatal"
+echo "PASS compiler errors without output remain fatal"
 unset FAIL_LANGUAGE FAIL_WITH_OUTPUT
 export EMPTY_OUTPUT=1
 if bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1; then
-    echo "FAIL Opt-in akzeptierte leere CSV-Ausgabe"; exit 1
+    echo "FAIL opt-in accepted empty CSV output"; exit 1
 fi
 grep -q '^compile_exit_code=7$' "$OUT_CFG/en/.addon-build-info"
-echo "PASS leeres Ausgabeverzeichnis bleibt fatal, bestehender Export unverändert"
+echo "PASS empty output directory remains fatal, existing export unchanged"
 unset EMPTY_OUTPUT
 
 export ENTRYPOINT_CFG=src/test.tsp DIRECT_COMPILER_EXIT=7
 bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1
 grep -q '^direct compiler' "$OUT_CFG/en/test.csv"
 grep -q '^compile_exit_code=7$' "$OUT_CFG/en/.addon-build-info"
-echo "PASS Opt-in unterstützt direkten TypeSpec-Einstiegspunkt"
+echo "PASS opt-in supports direct TypeSpec entrypoint"
 export NO_COMPILER_OUTPUT=1
 if bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1; then
-    echo "FAIL direkter Compilerfehler ohne Ausgabe wurde ignoriert"; exit 1
+    echo "FAIL direct compiler error without output was ignored"; exit 1
 fi
 unset NO_COMPILER_OUTPUT DIRECT_COMPILER_EXIT ENTRYPOINT_CFG
 
@@ -180,16 +181,16 @@ unset NO_COMPILER_OUTPUT DIRECT_COMPILER_EXIT ENTRYPOINT_CFG
 bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1
 grep -q '^compile_exit_code=0$' "$OUT_CFG/en/.addon-build-info"
 grep -q '^compile_errors_ignored=false$' "$OUT_CFG/en/.addon-build-info"
-echo "PASS erfolgreicher Folgelauf setzt Fehlerstatus zurück"
+echo "PASS successful follow-up run resets error status"
 
 export FAIL_INSTALL=1
 if bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1; then
-    echo "FAIL Installationsfehler wurde ignoriert"; exit 1
+    echo "FAIL installation error was ignored"; exit 1
 fi
 unset FAIL_INSTALL
 export FAIL_TREE=1
 if bash "$RUN_FILE" > "$TEST_DIR/log" 2>&1; then
-    echo "FAIL Abhängigkeitsfehler wurde ignoriert"; exit 1
+    echo "FAIL dependency error was ignored"; exit 1
 fi
 unset FAIL_TREE
-echo "PASS Installations- und Abhängigkeitsfehler werden auch bei aktiviertem Opt-in nicht übergangen"
+echo "PASS installation and dependency errors are not skipped even with opt-in enabled"

@@ -47,8 +47,14 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install add-on dependencies
+        run: npm ci --prefix rootfs/opt/ebusd-typespec-compiler --omit=dev --ignore-scripts --no-audit --no-fund
+
       - name: Run offline runner tests
         run: bash tests/runner.test.sh
+
+      - name: Run resolver tests
+        run: node --test rootfs/opt/ebusd-typespec-compiler/resolver.test.mjs
 
   live-test:
     name: Live pipeline test
@@ -126,7 +132,7 @@ jobs:
           build-args: |
             BUILD_FROM=ghcr.io/home-assistant/${{ matrix.arch }}-base:3.21
           container-registry-password: ${{ secrets.GITHUB_TOKEN }}
-          image: ghcr.io/${{ github.repository_owner }}/${{ matrix.arch }}-ha-ebusd-typespec-compiler
+          image: ghcr.io/${{ github.repository_owner }}/ha-ebusd-typespec-compiler-${{ matrix.arch }}
           image-tags: |
             ${{ needs.prepare.outputs.version }}
             latest
@@ -147,14 +153,51 @@ jobs:
       id-token: write
       packages: write
     steps:
-      - name: Publish multi-arch manifest
-        uses: home-assistant/builder/actions/publish-multi-arch-manifest@7412f0023ea9b6e58e8bb5059f1660f51376f49a # 2026.09.0
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
-          architectures: '["aarch64", "amd64"]'
-          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
-          image-name: ha-ebusd-typespec-compiler
-          image-tags: |
-            ${{ needs.prepare.outputs.version }}
-            latest
-          registry-prefix: ghcr.io/${{ github.repository_owner }}
-          skip-existing: ${{ needs.prepare.outputs.version }}
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Check if this version was already published
+        id: check
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/ha-ebusd-typespec-compiler
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          image_ref="${IMAGE}:${VERSION}"
+          if docker buildx imagetools inspect "${image_ref}" > /dev/null 2>&1; then
+            echo "::warning::Manifest ${image_ref} already exists, skipping publish. Bump the version to publish these changes."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create multi-arch manifest
+        if: steps.check.outputs.publish == 'true'
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/ha-ebusd-typespec-compiler
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${VERSION}" \
+            --tag "${IMAGE}:latest" \
+            "${IMAGE}-amd64:${VERSION}" \
+            "${IMAGE}-aarch64:${VERSION}"
+
+      - name: Install Cosign
+        if: steps.check.outputs.publish == 'true'
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Sign published manifests
+        if: steps.check.outputs.publish == 'true'
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/ha-ebusd-typespec-compiler
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          cosign sign --yes "${IMAGE}:${VERSION}"
+          cosign sign --yes "${IMAGE}:latest"
