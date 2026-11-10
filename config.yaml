@@ -9,6 +9,7 @@ boot: manual
 arch:
   - aarch64
   - amd64
+image: "ghcr.io/muewe/ha-ebusd-typespec-compiler"
 homeassistant_api: false
 hassio_api: false
 map:

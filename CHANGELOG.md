@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- CI/CD: new GitHub Actions workflow lints the add-on configuration, runs the
+  offline runner tests, builds the image for `aarch64` and `amd64`, and
+  publishes the multi-arch image to ghcr.io (tag = add-on version, existing
+  tags are never overwritten). Images are no longer built locally on the
+  Home Assistant host.
+- `config.yaml` now references the published image; `build.yaml` pins the
+  Home Assistant base images to Alpine 3.21.
+- Dependabot keeps the pinned workflow action versions up to date.
+
 ## 1.6.1
 
 - Documentation switched to English: `DOCS.md`, `CHANGELOG.md`, and a new

@@ -48,6 +48,18 @@ output_path: /config/ebusd-configuration
 Point ebusd at the result, for example
 `--configpath /config/ebusd-configuration/en`.
 
+## Continuous Integration
+
+Every push and pull request runs the add-on linter and the offline runner
+tests, and builds the image for `aarch64` and `amd64`. On pushes to `main`
+(and via manual workflow dispatch), the multi-arch image is published to
+[ghcr.io/muewe/ha-ebusd-typespec-compiler](https://github.com/muewe/ha-ebusd-typespec-compiler/pkgs/container/ha-ebusd-typespec-compiler)
+— the tag always matches `version` in `config.yaml`, and an already published
+tag is never overwritten, so bump the version to publish a new image. The live
+pipeline test against the upstream configuration repository can be triggered
+manually via workflow dispatch. Action versions are pinned and updated by
+Dependabot.
+
 ## Documentation
 
 - Full configuration reference, dependency modes, and security notes:
