@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0
 
 - CI/CD: new GitHub Actions workflow lints the add-on configuration, runs the
   offline runner and resolver tests, builds the image for `aarch64` and
