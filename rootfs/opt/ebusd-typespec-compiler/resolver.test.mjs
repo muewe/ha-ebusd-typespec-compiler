@@ -26,30 +26,30 @@ const manifest = (compilerRange, emitterRange) => ({
   dependencies: { [COMPILER]: compilerRange, [EMITTER]: emitterRange },
 });
 
-test("alter Fork mit offenem Emitter-Bereich erhält passende 1.8/0.26/0.78-Toolchain", () => {
+test("old fork with open emitter range gets matching 1.8/0.26/0.78 toolchain", () => {
   const result = selectToolchain(manifest("~1.8.0", ">=0.26.0"), metadata, "24.0.0");
   assert.deepEqual([result.compiler, result.emitter, result.asset], ["1.8.0", "0.26.0", "0.78.0"]);
 });
-test("john30-Master erhält asset-emitter 0.79.1 statt inkompatiblem 0.79.3", () => {
+test("john30 master gets asset-emitter 0.79.1 instead of incompatible 0.79.3", () => {
   const result = selectToolchain(manifest("~1.12.0", "~0.29.0"), metadata, "24.0.0");
   assert.deepEqual([result.compiler, result.emitter, result.asset], ["1.12.0", "0.29.0", "0.79.1"]);
 });
-test("neuer PR kann neueste deklarierte Toolchain verwenden", () => {
+test("new PR can use the newest declared toolchain", () => {
   const result = selectToolchain(manifest("~1.17.0", "~0.31.0"), metadata, "24.0.0");
   assert.deepEqual([result.compiler, result.emitter, result.asset], ["1.17.0", "0.31.0", "0.79.3"]);
 });
-test("inkompatible exakte Pins werden nicht stillschweigend aufgeweicht", () => {
-  assert.throws(() => selectToolchain(manifest("1.8.0", "0.31.0"), metadata, "24.0.0"), /Keine kompatible Toolchain/);
+test("incompatible exact pins are not silently relaxed", () => {
+  assert.throws(() => selectToolchain(manifest("1.8.0", "0.31.0"), metadata, "24.0.0"), /No compatible toolchain/);
 });
-test("Node-Engine wird beachtet", () => {
-  assert.throws(() => selectToolchain(manifest("~1.12.0", "~0.29.0"), metadata, "20.0.0"), /Keine kompatible Toolchain/);
+test("Node engine is respected", () => {
+  assert.throws(() => selectToolchain(manifest("~1.12.0", "~0.29.0"), metadata, "20.0.0"), /No compatible toolchain/);
 });
-test("nicht vorhandene oder nicht unterstützte Semver-Vorgaben werden abgelehnt", () => {
+test("missing or unsupported semver ranges are rejected", () => {
   for (const range of [undefined, "", "github:user/compiler", "file:../compiler"]) {
-    assert.throws(() => selectToolchain(manifest(range, "^0.29"), metadata, "24.0.0"), /nicht unterstützt/);
+    assert.throws(() => selectToolchain(manifest(range, "^0.29"), metadata, "24.0.0"), /unsupported/);
   }
 });
-test("nur temporäres Manifest/Lockfile geändert; scripts und TypeSpec-Quellen bleiben erhalten", () => {
+test("only temporary manifest/lockfile changed; scripts and TypeSpec sources are preserved", () => {
   const directory = mkdtempSync(join(tmpdir(), "toolchain-test-"));
   try {
     const value = manifest("~1.12.0", "~0.29.0");

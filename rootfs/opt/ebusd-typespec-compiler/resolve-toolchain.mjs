@@ -30,7 +30,7 @@ export function selectToolchain(manifest, metadata, nodeVersion = process.versio
   const emitterRange = dependencies[EMITTER];
   for (const [name, range] of [[COMPILER, compilerRange], [EMITTER, emitterRange]]) {
     if (typeof range !== "string" || !range.trim() || !semver.validRange(range)) {
-      throw new Error(`${name}: npm-Semver-Vorgabe fehlt oder wird nicht unterstützt (${range}). Für Git-/Datei-Abhängigkeiten dependency_mode: repository verwenden.`);
+      throw new Error(`${name}: npm semver range is missing or unsupported (${range}). Use dependency_mode: repository for Git/file dependencies.`);
     }
   }
   const compilers = releases(metadata[COMPILER], compilerRange, nodeVersion);
@@ -51,7 +51,7 @@ export function selectToolchain(manifest, metadata, nodeVersion = process.versio
       };
     }
   }
-  throw new Error(`Keine kompatible Toolchain innerhalb von ${COMPILER} ${compilerRange} und ${EMITTER} ${emitterRange} gefunden. Keine Versionsgrenzen wurden aufgeweicht.`);
+  throw new Error(`No compatible toolchain found within ${COMPILER} ${compilerRange} and ${EMITTER} ${emitterRange}. No version constraints were relaxed.`);
 }
 
 function npmMetadata(name, range = "*") {
@@ -76,7 +76,7 @@ export function prepareToolchain(directory, metadataProvider = npmMetadata) {
   for (const name of [COMPILER, EMITTER]) {
     if (typeof dependencies[name] !== "string" || !dependencies[name].trim() ||
         !semver.validRange(dependencies[name])) {
-      throw new Error(`${name}: keine unterstützte Semver-Vorgabe. dependency_mode: repository verwenden.`);
+      throw new Error(`${name}: unsupported semver range. Use dependency_mode: repository.`);
     }
   }
   const compilers = metadataProvider(COMPILER, dependencies[COMPILER]);
@@ -114,10 +114,10 @@ export function prepareToolchain(directory, metadataProvider = npmMetadata) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const choice = prepareToolchain(process.argv[2] ?? ".");
-    console.log(`Toolchain: compiler ${choice.compiler} (Vorgabe ${choice.compilerRange}), emitter ${choice.emitter} (Vorgabe ${choice.emitterRange}), asset-emitter ${choice.asset}`);
-    console.log("Nur package.json/Lockfiles im temporären Checkout angepasst; TypeSpec-Quellen unverändert.");
+    console.log(`Toolchain: compiler ${choice.compiler} (range ${choice.compilerRange}), emitter ${choice.emitter} (range ${choice.emitterRange}), asset-emitter ${choice.asset}`);
+    console.log("Only package.json/lockfiles in the temporary checkout were adjusted; TypeSpec sources remain unchanged.");
   } catch (error) {
-    console.error(`Toolchain-Auflösung fehlgeschlagen: ${error.message}`);
+    console.error(`Toolchain resolution failed: ${error.message}`);
     process.exitCode = 1;
   }
 }

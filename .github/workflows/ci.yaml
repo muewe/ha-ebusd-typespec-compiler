@@ -1,0 +1,166 @@
+name: CI
+
+# Lint and test every change, build the add-on image, and publish it to
+# ghcr.io/muewe/ha-ebusd-typespec-compiler on pushes to main and manual runs.
+# Publishing follows the Home Assistant versioning model: the image tag equals
+# `version` in config.yaml, and an already published tag is never overwritten
+# (the build is skipped instead). Bump `version` to publish a new image.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      live-test:
+        description: "Run the live pipeline test against the upstream ebusd-configuration repository"
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  lint:
+    name: Lint add-on configuration
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run Home Assistant add-on linter
+        uses: frenck/action-addon-linter@d51677290aef26cdfc835271dd3c7343ce502809 # v2.21
+
+  test:
+    name: Runner tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+
+      - name: Install add-on dependencies
+        run: npm ci --prefix rootfs/opt/ebusd-typespec-compiler --omit=dev --ignore-scripts --no-audit --no-fund
+
+      - name: Run offline runner tests
+        run: bash tests/runner.test.sh
+
+      - name: Run resolver tests
+        run: node --test rootfs/opt/ebusd-typespec-compiler/resolver.test.mjs
+
+  live-test:
+    name: Live pipeline test
+    if: github.event_name == 'workflow_dispatch' && inputs.live-test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+
+      - name: Run live pipeline against upstream ebusd-configuration
+        run: bash tests/live-runner.sh https://github.com/john30/ebusd-configuration master en
+
+  prepare:
+    name: Prepare build metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      addon-name: ${{ steps.meta.outputs.addon-name }}
+      addon-description: ${{ steps.meta.outputs.addon-description }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Extract add-on metadata from config.yaml
+        id: meta
+        run: |
+          version="$(sed -n 's/^version:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' config.yaml)"
+          addon_name="$(sed -n 's/^name:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' config.yaml)"
+          addon_description="$(sed -n 's/^description:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' config.yaml)"
+          if [[ -z "${version}" || -z "${addon_name}" || -z "${addon_description}" ]]; then
+            echo "::error::Could not extract version, name or description from config.yaml"
+            exit 1
+          fi
+          {
+            echo "version=${version}"
+            echo "addon-name=${addon_name}"
+            echo "addon-description=${addon_description}"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.arch }} image
+    needs: [lint, test, prepare]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-24.04
+          - arch: aarch64
+            os: ubuntu-24.04-arm
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        uses: home-assistant/builder/actions/build-image@7412f0023ea9b6e58e8bb5059f1660f51376f49a # 2026.09.0
+        with:
+          arch: ${{ matrix.arch }}
+          build-args: |
+            BUILD_FROM=ghcr.io/home-assistant/${{ matrix.arch }}-base:3.21
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+          image: ghcr.io/${{ github.repository_owner }}/${{ matrix.arch }}-ha-ebusd-typespec-compiler
+          image-tags: |
+            ${{ needs.prepare.outputs.version }}
+            latest
+          labels: |
+            io.hass.type=addon
+            io.hass.name=${{ needs.prepare.outputs.addon-name }}
+            io.hass.description=${{ needs.prepare.outputs.addon-description }}
+          push: ${{ github.event_name != 'pull_request' }}
+          skip-existing: ${{ needs.prepare.outputs.version }}
+          version: ${{ needs.prepare.outputs.version }}
+
+  manifest:
+    name: Publish multi-arch manifest
+    needs: [prepare, build]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      packages: write
+    steps:
+      - name: Publish multi-arch manifest
+        uses: home-assistant/builder/actions/publish-multi-arch-manifest@7412f0023ea9b6e58e8bb5059f1660f51376f49a # 2026.09.0
+        with:
+          architectures: '["aarch64", "amd64"]'
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+          image-name: ha-ebusd-typespec-compiler
+          image-tags: |
+            ${{ needs.prepare.outputs.version }}
+            latest
+          registry-prefix: ghcr.io/${{ github.repository_owner }}
+          skip-existing: ${{ needs.prepare.outputs.version }}
